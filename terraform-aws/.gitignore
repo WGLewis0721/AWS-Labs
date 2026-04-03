@@ -8,6 +8,8 @@
 # Terraform crash logs
 crash.log
 crash.*.log
+tfplan
+*.tfplan
 
 # Ignore tfvars with secrets by default
 *.tfvars
