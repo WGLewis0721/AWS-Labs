@@ -1,0 +1,1566 @@
+# Copilot Task: Complete Architecture Refactor
+
+# Subnet Redesign + Palo Alto ENI Placement + NLB + NAT Gateway + Customer Onboarding
+
+## MANDATORY FIRST STEP
+
+Before doing anything else, read these three files completely and confirm:
+
+1. `artifacts/copilot-instructions-v1.md`
+1. `artifacts/skills/terraform/SKILL.md`
+1. `artifacts/skills/aws-cli/SKILL.md`
+
+Do not proceed until all three are confirmed.
+
+-----
+
+## What This Lab Simulates
+
+This is not a generic networking lab. It simulates a real DoD-adjacent
+production architecture used in an IL4/IL5 GovCloud environment. Every
+design decision maps to a real operational requirement. Treat all work
+as if it will be reviewed by a senior cloud security engineer.
+
+### The Real Architecture Being Simulated
+
+```
+Customer browser (12,000+ customers, unmanaged devices, no client install)
+      │
+      │ HTTPS port 443
+      ▼
+ALB (internet-facing, VPC-B untrust subnet)
+      │ TLS termination, WAF, ACM certificate
+      ▼
+Palo Alto VM-Series NGFW — UNTRUST ENI
+      │ Layer 7 inspection, IPS, URL filtering, threat prevention
+      │ source_dest_check = false (CRITICAL — Palo routes others' traffic)
+Palo Alto VM-Series NGFW — TRUST ENI
+      │ Inspected traffic exits toward AppGate
+      ▼
+AppGate SDP Portal appliance
+      │ Clientless browser-based Zero Trust access
+      │ Customer authenticates via MFA + IdP
+      │ Portal performs Single Packet Authorization (SPA) on customer's behalf
+      │ No AppGate client required on customer device
+      ▼
+AppGate Gateway
+      │ Per-user encrypted micro-tunnel ("segment of one")
+      │ Only entitled resources are reachable — everything else is invisible
+      ▼
+Customer's entitled resource
+      │
+      │ Return path:
+      ▼
+AppGate Gateway → Palo TRUST ENI → [inspect outbound] → Palo UNTRUST ENI
+      │
+      ▼
+ALB → IGW → Internet → Customer browser
+
+──────────────────────────────────────────────────────
+MANAGEMENT PATH (separate, never crosses customer path):
+A1 Windows (RDP) / A2 Linux (SSH) → TGW1 → Palo MGMT ENI
+A1 / A2 → TGW1 → AppGate Controller
+──────────────────────────────────────────────────────
+INTERNAL EGRESS (OS updates, license checks, IdP calls):
+B1/C1/D1 → TGW → VPC-A → NAT Gateway → IGW → Internet
+NAT Gateway is NOT in the customer traffic path.
+──────────────────────────────────────────────────────
+CLOUD HOST VISIBILITY (billing/SLA only):
+VPC Flow Logs on VPC-A → CloudWatch
+Cloud host reads flow logs for billing reconciliation and SLA reporting.
+They do NOT inspect customer payload. Customer traffic never routes
+through VPC-A. Flow logs give equivalent visibility to NAT logs
+without adding a hop to the customer path.
+```
+
+### Key Architectural Invariants — Never Violate These
+
+1. Customers NEVER reach VPC-A (Cloud Host). Enforced at TGW level —
+   VPC-A and VPC-D share no Transit Gateway. No routing change can bridge them.
+1. Palo Alto is the ONLY internet-facing component in the customer path.
+   AppGate Portal, Gateway, and Controller are ALL private — no public IPs.
+1. Customer traffic enters through Palo and returns through Palo.
+   AppGate does NOT have a separate internet-facing path.
+1. source_dest_check MUST be false on Palo UNTRUST and TRUST ENIs.
+   Palo routes traffic not destined for its own IP. AWS drops such
+   packets by default — disabling this check is mandatory, not optional.
+1. NLB-C (fronting AppGate Portal) is internal-only.
+   It is reachable from VPC-B trust side via TGW1, NOT from the internet.
+1. The NAT Gateway handles only management/internal egress.
+   It is never in the customer traffic path.
+
+-----
+
+## Complete New Subnet Design
+
+### VPC-A (10.0.0.0/16) — Cloud Host / Management
+
+```
+subnet-a-public    10.0.1.0/24   PUBLIC
+  Hosts: A1 Windows (10.0.1.10), A2 Linux (10.0.1.20), NAT Gateway
+  IGW: igw-a (existing)
+  Route table:
+    10.0.0.0/16 → local
+    10.1.0.0/16 → TGW1
+    10.2.0.0/16 → TGW1
+    0.0.0.0/0   → IGW (for A1/A2 public internet)
+    [TGW1 brings traffic from B/C/D destined for NAT GW]
+    → NAT GW → IGW handles that via VPC-A route table
+```
+
+No subnet changes in VPC-A. NAT Gateway and EIP are new resources here.
+
+-----
+
+### VPC-B (10.1.0.0/16) — Palo Alto NGFW
+
+```
+subnet-b-untrust   10.1.1.0/24   PUBLIC
+  Hosts: Palo UNTRUST ENI (10.1.1.10), ALB, NLB-B
+  IGW: igw-b (NEW — VPC-B needs its own IGW for internet-facing untrust)
+  Route table:
+    10.1.0.0/16 → local
+    0.0.0.0/0   → igw-b
+
+subnet-b-trust     10.1.2.0/24   PRIVATE
+  Hosts: Palo TRUST ENI (10.1.2.10)
+  Route table:
+    10.1.0.0/16 → local
+    10.0.0.0/16 → TGW1  (return to mgmt)
+    10.2.0.0/16 → TGW1  (toward AppGate)
+    10.3.0.0/16 → TGW2  (return to customer sim VPC-D)
+    0.0.0.0/0   → TGW1  (centralized egress via VPC-A NAT GW)
+
+subnet-b-mgmt      10.1.3.0/24   PRIVATE
+  Hosts: Palo MGMT ENI (10.1.3.10)
+  Route table:
+    10.1.0.0/16 → local
+    10.0.0.0/16 → TGW1  (reachable from VPC-A management)
+    0.0.0.0/0   → TGW1  (centralized egress for Panorama/updates)
+```
+
+VPC-B needs a NEW Internet Gateway (igw-b) attached to VPC-B.
+Only subnet-b-untrust uses it. Trust and mgmt subnets have no IGW route.
+
+-----
+
+### VPC-C (10.2.0.0/16) — AppGate SDP Stack
+
+```
+subnet-c-dmz          10.2.1.0/24   PRIVATE (internal-facing, NOT internet)
+  Hosts: NLB-C
+  Note: called "dmz" not "public" — it is internal-only, reachable
+        from VPC-B trust side (10.1.2.0/24) via TGW1 only.
+        No IGW. No public IPs.
+  Route table:
+    10.2.0.0/16 → local
+    10.1.0.0/16 → TGW1
+    10.0.0.0/16 → TGW1
+    0.0.0.0/0   → TGW1  (centralized egress)
+
+subnet-c-portal       10.2.2.0/24   PRIVATE
+  Hosts: AppGate Portal appliance / C1 lab sim (10.2.2.10)
+  Route table: same as subnet-c-dmz
+
+subnet-c-gateway      10.2.3.0/24   PRIVATE
+  Hosts: AppGate Gateway (10.2.3.10 — placeholder, no lab instance)
+  Route table: same as subnet-c-dmz
+
+subnet-c-controller   10.2.4.0/24   PRIVATE
+  Hosts: AppGate Controller (10.2.4.10 — placeholder, no lab instance)
+  Route table: same as subnet-c-dmz
+```
+
+VPC-C has NO Internet Gateway. NO public IPs on any instance.
+All four subnets route internet-bound traffic to TGW1 → VPC-A NAT GW.
+
+-----
+
+### VPC-D (10.3.0.0/16) — Customer Network Simulation
+
+```
+subnet-d-private   10.3.1.0/24   PRIVATE
+  Hosts: D1 (10.3.1.10)
+  Route table:
+    10.3.0.0/16 → local
+    10.1.0.0/16 → TGW2
+    10.2.0.0/16 → TGW2
+    0.0.0.0/0   → TGW2  (internet egress hairpins through VPC-B to TGW1 to VPC-A)
+  NO route to 10.0.0.0/16 (VPC-A) — enforced by TGW isolation
+```
+
+###############################################################
+
+# VPC-D — Customer Network Simulation (Lab Test Harness)
+
+# 
+
+# PURPOSE: Simulates a customer network onboarded via TGW
+
+# attachment (Method 3 below). D1 is the test client used
+
+# to validate that the security stack works as designed.
+
+# 
+
+# In production, real customers onboard via one of:
+
+# 
+
+# METHOD 1 — Browser/Portal (Primary method — 12k customers)
+
+# No AWS networking changes needed per customer.
+
+# Customer opens browser → portal.app.mil → authenticates
+
+# via AppGate Portal → Portal performs SPA on their behalf
+
+# → AppGate Gateway tunnels them to entitled resources.
+
+# All onboarding work is in AppGate policy, not AWS.
+
+# 
+
+# METHOD 2 — Site-to-Site VPN (Customer on-prem network)
+
+# Used when an entire customer organization network must
+
+# be integrated, not just individual browser users.
+
+# Provisions per customer:
+
+# - aws_customer_gateway (customer’s public IP + ASN)
+
+# - aws_vpn_connection (IPSec/BGP to Palo untrust ENI)
+
+# Traffic flow: Customer network → VPN → Palo untrust ENI
+
+# → [inspect] → Palo trust ENI → TGW1 → AppGate → resource
+
+# 
+
+# METHOD 3 — TGW Attachment (Customer has AWS environment)
+
+# Customer AWS VPC attaches to TGW2 via RAM share.
+
+# Their CIDR is added to TGW2 route table.
+
+# Traffic flow: Customer VPC → TGW2 → Palo → AppGate
+
+# → entitled resource → return path back through Palo.
+
+# THIS IS WHAT VPC-D SIMULATES.
+
+# Provisions per customer:
+
+# - aws_ram_resource_share (share TGW2 with their account)
+
+# - aws_ec2_transit_gateway_route (their CIDR in TGW2 RT)
+
+# 
+
+# ISOLATION GUARANTEE:
+
+# VPC-A and VPC-D share NO Transit Gateway.
+
+# There is physically no network path between them.
+
+# No route table change, peering, or policy can bridge them.
+
+# 
+
+# WHAT THIS LAB VALIDATES:
+
+# - D1 can reach Portal (NLB-C:443 returns 200)
+
+# - Palo Alto is inline (no path to VPC-C bypasses VPC-B)
+
+# - AppGate controls access (D1 cannot reach arbitrary IPs)
+
+# - D1 cannot reach VPC-A (management isolation holds)
+
+# - Return path works (curl responses return to D1)
+
+###############################################################
+
+-----
+
+## TGW Route Table Updates
+
+### TGW1 (MGMT) route table
+
+|Destination|Target          |Purpose                                                              |
+|-----------|----------------|---------------------------------------------------------------------|
+|10.0.0.0/16|VPC-A attachment|VPC-A reachable from B and C                                         |
+|10.1.0.0/16|VPC-B attachment|VPC-B reachable from A and C                                         |
+|10.2.0.0/16|VPC-C attachment|VPC-C reachable from A and B                                         |
+|0.0.0.0/0  |VPC-A attachment|Centralized egress — all unknown destinations hairpin to VPC-A NAT GW|
+
+### TGW2 (CUSTOMER) route table
+
+|Destination|Target          |Purpose                                                  |
+|-----------|----------------|---------------------------------------------------------|
+|10.1.0.0/16|VPC-B attachment|VPC-B reachable from D                                   |
+|10.2.0.0/16|VPC-C attachment|VPC-C reachable from D                                   |
+|10.3.0.0/16|VPC-D attachment|VPC-D return path                                        |
+|0.0.0.0/0  |VPC-B attachment|D1 internet egress hairpins through Palo to TGW1 to VPC-A|
+
+-----
+
+## Palo Alto ENI Configuration (CRITICAL)
+
+B1 simulates the Palo Alto VM-Series NGFW. In production this is a
+licensed VM-Series appliance. In the lab it is an EC2 instance with
+three separate ENIs simulating the three Palo data/mgmt planes.
+
+### ENI Resources — Create as STANDALONE aws_network_interface resources
+
+Do NOT define ENIs inline in the instance resource block.
+Standalone ENIs allow source_dest_check to be set at the ENI level.
+
+```hcl
+resource "aws_network_interface" "palo_untrust" {
+  subnet_id         = aws_subnet.subnet_b_untrust.id
+  private_ips       = ["10.1.1.10"]
+  source_dest_check = false   # MANDATORY — Palo routes others' traffic
+  security_groups   = [aws_security_group.sg_palo_untrust.id]
+  tags = { Name = "palo-eni-untrust" }
+}
+
+resource "aws_network_interface" "palo_trust" {
+  subnet_id         = aws_subnet.subnet_b_trust.id
+  private_ips       = ["10.1.2.10"]
+  source_dest_check = false   # MANDATORY
+  security_groups   = [aws_security_group.sg_palo_trust.id]
+  tags = { Name = "palo-eni-trust" }
+}
+
+resource "aws_network_interface" "palo_mgmt" {
+  subnet_id         = aws_subnet.subnet_b_mgmt.id
+  private_ips       = ["10.1.3.10"]
+  source_dest_check = true    # MGMT ENI is destination — check stays on
+  security_groups   = [aws_security_group.sg_palo_mgmt.id]
+  tags = { Name = "palo-eni-mgmt" }
+}
+```
+
+### ENI Attachment to B1 Instance
+
+device_index ordering is fixed — do not change:
+
+- device_index = 0 → UNTRUST (eth0) — primary interface
+- device_index = 1 → TRUST (eth1)
+- device_index = 2 → MGMT (eth2)
+
+```hcl
+resource "aws_instance" "b1" {
+  ami           = data.aws_ami.al2023.id
+  instance_type = "t3.medium"   # needs more RAM for multi-ENI
+  # Do NOT specify subnet_id here — ENIs control placement
+
+  network_interface {
+    network_interface_id = aws_network_interface.palo_untrust.id
+    device_index         = 0
+  }
+  network_interface {
+    network_interface_id = aws_network_interface.palo_trust.id
+    device_index         = 1
+  }
+  network_interface {
+    network_interface_id = aws_network_interface.palo_mgmt.id
+    device_index         = 2
+  }
+}
+```
+
+### EIP for UNTRUST ENI
+
+```hcl
+resource "aws_eip" "palo_untrust_eip" {
+  domain                    = "vpc"
+  network_interface         = aws_network_interface.palo_untrust.id
+  associate_with_private_ip = "10.1.1.10"
+  depends_on                = [aws_internet_gateway.igw_b]
+}
+```
+
+-----
+
+## ALB — Internet-Facing Customer Entry Point
+
+```
+Placement:   subnet-b-untrust (10.1.1.0/24), VPC-B
+Type:        application (layer 7)
+Scheme:      internet-facing
+Listener:    HTTPS 443 with ACM certificate
+Target:      Palo UNTRUST ENI (10.1.1.10) port 443
+```
+
+Security Group on ALB:
+
+- Ingress: TCP 443 from 0.0.0.0/0 (customers from internet)
+- Ingress: TCP 80 from 0.0.0.0/0 (redirect to 443)
+- Egress: TCP 443 to 10.1.1.0/24 (toward Palo untrust ENI)
+
+This is the ONLY internet-facing resource in the customer traffic path.
+
+-----
+
+## NLB-B — Internal, VPC-B (Palo Alto Sim)
+
+```
+Placement:   subnet-b-untrust (10.1.1.0/24), VPC-B
+Type:        network (layer 4)
+Scheme:      internal
+Listeners:
+  TCP 80  → Target Group → Palo TRUST ENI (10.1.2.10) port 80
+  TCP 443 → Target Group → Palo TRUST ENI (10.1.2.10) port 443
+```
+
+Reachable from:
+
+- VPC-A via TGW1 (A1 Chrome management browser validation)
+- VPC-D via TGW2 (D1 simulated customer traffic)
+
+NLBs have no security groups. Access controlled by:
+
+- NACL on subnet-b-untrust
+- Security Group on B1 TRUST ENI (allow from 10.1.1.0/24)
+
+-----
+
+## NLB-C — Internal, VPC-C (AppGate Portal Sim)
+
+```
+Placement:   subnet-c-dmz (10.2.1.0/24), VPC-C
+Type:        network (layer 4)
+Scheme:      internal
+Listeners:
+  TCP 80  → Target Group → AppGate Portal / C1 (10.2.2.10) port 80
+  TCP 443 → Target Group → AppGate Portal / C1 (10.2.2.10) port 443
+```
+
+Reachable from:
+
+- VPC-B trust side (10.1.2.0/24) via TGW1 — post-Palo inspection
+- VPC-A via TGW1 — management access to AppGate controller UI (port 8443)
+
+NLBs have no security groups. Access controlled by:
+
+- NACL on subnet-c-dmz
+- Security Group on C1 (allow from 10.2.1.0/24)
+
+-----
+
+## NAT Gateway — Centralized Management Egress
+
+```
+Placement:   subnet-a-public (10.0.1.0/24), VPC-A
+Requires:    Elastic IP
+```
+
+This is NOT in the customer traffic path.
+Used only for: OS updates, AppGate license checks, Panorama calls,
+IdP federation calls, yum/dnf package installs on private instances.
+
+Customer traffic enters through ALB → Palo and exits through
+Palo UNTRUST ENI → ALB → IGW. Never touches VPC-A or NAT GW.
+
+Cloud Host (VPC-A) billing/SLA visibility is handled by VPC Flow Logs
+on VPC-A forwarded to CloudWatch — NOT by routing customer traffic
+through VPC-A. This satisfies the cloud host’s operational support
+requirement without adding any hop to the customer path.
+
+```hcl
+resource "aws_eip" "nat_gw_eip" {
+  domain     = "vpc"
+  depends_on = [aws_internet_gateway.igw_a]
+}
+
+resource "aws_nat_gateway" "nat_gw_a" {
+  allocation_id = aws_eip.nat_gw_eip.id
+  subnet_id     = aws_subnet.subnet_a_public.id
+  depends_on    = [aws_internet_gateway.igw_a]
+  tags = { Name = "nat-gw-vpc-a-centralized-egress" }
+}
+```
+
+-----
+
+## VPC Flow Logs — Cloud Host Billing/SLA Visibility
+
+```hcl
+resource "aws_cloudwatch_log_group" "vpc_a_flow_logs" {
+  name              = "/aws/vpc/flow-logs/vpc-a"
+  retention_in_days = 90
+}
+
+resource "aws_flow_log" "vpc_a" {
+  vpc_id          = aws_vpc.vpc_a.id
+  traffic_type    = "ALL"
+  iam_role_arn    = aws_iam_role.flow_log_role.arn
+  log_destination = aws_cloudwatch_log_group.vpc_a_flow_logs.arn
+  tags = { Name = "flow-log-vpc-a-billing-sla" }
+}
+```
+
+-----
+
+## Security Groups — Complete Revised Set
+
+### sg-alb (NEW — ALB in subnet-b-untrust)
+
+```
+Ingress: TCP 443 from 0.0.0.0/0
+Ingress: TCP 80  from 0.0.0.0/0
+Egress:  TCP 443 to 10.1.1.0/24
+```
+
+### sg-palo-untrust (UNTRUST ENI)
+
+```
+Ingress: TCP 443 from 0.0.0.0/0        (customer HTTPS from ALB)
+Ingress: TCP 80  from 0.0.0.0/0        (HTTP redirect)
+Ingress: ICMP    from 10.0.0.0/8       (internal ping troubleshoot)
+Egress:  ALL     to 0.0.0.0/0
+```
+
+### sg-palo-trust (TRUST ENI)
+
+```
+Ingress: TCP 80, 443 from 10.1.1.0/24  (from NLB-B)
+Ingress: TCP 80, 443 from 10.2.1.0/24  (return from AppGate NLB-C)
+Ingress: TCP 1024-65535 from 10.2.0.0/16 (ephemeral return from AppGate)
+Ingress: ICMP    from 10.0.0.0/8
+Egress:  ALL     to 10.0.0.0/16        (return to VPC-A)
+Egress:  ALL     to 10.2.0.0/16        (toward AppGate)
+Egress:  ALL     to 10.3.0.0/16        (return to customer VPC-D)
+```
+
+### sg-palo-mgmt (MGMT ENI)
+
+```
+Ingress: TCP 22   from 10.0.0.0/16     (SSH from VPC-A bastion only)
+Ingress: TCP 443  from 10.0.0.0/16     (HTTPS mgmt console from VPC-A)
+Ingress: ICMP     from 10.0.0.0/16
+Egress:  ALL      to 10.0.0.0/16       (return to VPC-A)
+Egress:  TCP 443  to 0.0.0.0/0         (Panorama, license updates via NAT GW)
+```
+
+### sg-appgate-portal / sg-c1 (C1 in subnet-c-portal)
+
+```
+Ingress: TCP 80, 443 from 10.2.1.0/24  (from NLB-C)
+Ingress: TCP 8443    from 10.0.0.0/16  (AppGate controller admin UI from VPC-A)
+Ingress: ICMP        from 10.0.0.0/8
+Egress:  ALL         to 10.2.1.0/24    (return to NLB-C)
+Egress:  ALL         to 10.0.0.0/16    (return to VPC-A mgmt)
+Egress:  TCP 443     to 0.0.0.0/0      (IdP, license calls via NAT GW)
+```
+
+### sg-customer-d1 (D1 in subnet-d-private)
+
+```
+Ingress: TCP 22       from 10.1.0.0/16  (SSH hop from VPC-B only)
+Ingress: TCP 1024-65535 from 10.1.0.0/16 (HTTP return from B1)
+Ingress: TCP 1024-65535 from 10.2.0.0/16 (HTTP return from C1)
+Ingress: ICMP         from 10.1.0.0/16
+Egress:  TCP 80, 443  to 10.1.0.0/16   (to Palo/NLB-B)
+Egress:  TCP 443      to 10.2.0.0/16   (to AppGate/NLB-C)
+```
+
+### sg-vpc-a-windows (A1)
+
+```
+Ingress: TCP 3389 from 0.0.0.0/0       (RDP from operator workstation)
+Ingress: ICMP     from 10.0.0.0/8      (internal ping)
+Egress:  ALL      to 0.0.0.0/0
+```
+
+### sg-vpc-a-linux (A2)
+
+```
+Ingress: TCP 22   from 0.0.0.0/0       (SSH from operator workstation)
+Ingress: ICMP     from 10.0.0.0/8
+Egress:  ALL      to 0.0.0.0/0
+```
+
+-----
+
+## NACL — Complete Revised Set
+
+### nacl-vpc-a (subnet-a-public)
+
+Inbound:
+
+|Rule|Protocol|Action|Source     |Ports     |Purpose                              |
+|----|--------|------|-----------|----------|-------------------------------------|
+|100 |TCP     |allow |0.0.0.0/0  |3389      |RDP to A1                            |
+|110 |TCP     |allow |0.0.0.0/0  |22        |SSH to A2                            |
+|120 |TCP     |allow |10.1.0.0/16|1024-65535|Ephemeral return from VPC-B          |
+|130 |TCP     |allow |10.2.0.0/16|1024-65535|Ephemeral return from VPC-C          |
+|140 |TCP     |allow |0.0.0.0/0  |1024-65535|Ephemeral return (internet for A1/A2)|
+|150 |ICMP    |allow |10.0.0.0/8 |-         |Ping troubleshoot                    |
+
+Outbound:
+
+|Rule|Protocol|Action|Dest       |Ports     |Purpose                            |
+|----|--------|------|-----------|----------|-----------------------------------|
+|100 |TCP     |allow |10.1.0.0/16|22        |SSH to B1 mgmt                     |
+|110 |TCP     |allow |10.1.0.0/16|80,443    |HTTP/S to B1                       |
+|120 |TCP     |allow |10.2.0.0/16|443,8443  |HTTPS to AppGate                   |
+|130 |TCP     |allow |0.0.0.0/0  |80,443    |Internet for A1/A2                 |
+|140 |TCP     |allow |0.0.0.0/0  |1024-65535|Ephemeral return to RDP/SSH clients|
+|150 |ICMP    |allow |10.0.0.0/8 |-         |Ping                               |
+
+### nacl-b-untrust (subnet-b-untrust)
+
+Inbound:
+
+|Rule|Protocol|Action|Source     |Ports     |Purpose                            |
+|----|--------|------|-----------|----------|-----------------------------------|
+|100 |TCP     |allow |0.0.0.0/0  |443       |Customer HTTPS                     |
+|110 |TCP     |allow |0.0.0.0/0  |80        |HTTP redirect                      |
+|120 |TCP     |allow |10.0.0.0/16|1024-65535|Ephemeral from VPC-A (NLB-B access)|
+|130 |TCP     |allow |10.3.0.0/16|1024-65535|Ephemeral from VPC-D (NLB-B access)|
+|140 |TCP     |allow |0.0.0.0/0  |1024-65535|Ephemeral return from internet     |
+|150 |ICMP    |allow |10.0.0.0/8 |-         |Ping                               |
+
+Outbound:
+
+|Rule|Protocol|Action|Dest       |Ports     |Purpose                      |
+|----|--------|------|-----------|----------|-----------------------------|
+|100 |TCP     |allow |0.0.0.0/0  |1024-65535|Ephemeral return to customers|
+|110 |TCP     |allow |10.1.2.0/24|443       |To Palo trust ENI            |
+|120 |TCP     |allow |10.0.0.0/16|80,443    |NLB-B responses to VPC-A     |
+|130 |TCP     |allow |10.3.0.0/16|80,443    |NLB-B responses to VPC-D     |
+|140 |ICMP    |allow |10.0.0.0/8 |-         |Ping                         |
+
+### nacl-b-trust (subnet-b-trust)
+
+Inbound:
+
+|Rule|Protocol|Action|Source     |Ports     |Purpose                      |
+|----|--------|------|-----------|----------|-----------------------------|
+|100 |TCP     |allow |10.1.1.0/24|1024-65535|Ephemeral from untrust       |
+|110 |TCP     |allow |10.2.0.0/16|1024-65535|Ephemeral return from AppGate|
+|120 |TCP     |allow |10.0.0.0/16|1024-65535|Ephemeral from VPC-A         |
+|130 |ICMP    |allow |10.0.0.0/8 |-         |Ping                         |
+
+Outbound:
+
+|Rule|Protocol|Action|Dest       |Ports     |Purpose                    |
+|----|--------|------|-----------|----------|---------------------------|
+|100 |TCP     |allow |10.2.0.0/16|443       |Toward AppGate NLB-C       |
+|110 |TCP     |allow |10.1.1.0/24|1024-65535|Ephemeral return to untrust|
+|120 |TCP     |allow |10.0.0.0/16|1024-65535|Ephemeral return to VPC-A  |
+|130 |ICMP    |allow |10.0.0.0/8 |-         |Ping                       |
+
+### nacl-b-mgmt (subnet-b-mgmt)
+
+Inbound:
+
+|Rule|Protocol|Action|Source     |Ports     |Purpose                    |
+|----|--------|------|-----------|----------|---------------------------|
+|100 |TCP     |allow |10.0.0.0/16|22        |SSH from VPC-A             |
+|110 |TCP     |allow |10.0.0.0/16|443       |HTTPS mgmt from VPC-A      |
+|120 |TCP     |allow |0.0.0.0/0  |1024-65535|Ephemeral return (Panorama)|
+|130 |ICMP    |allow |10.0.0.0/8 |-         |Ping                       |
+
+Outbound:
+
+|Rule|Protocol|Action|Dest       |Ports     |Purpose                    |
+|----|--------|------|-----------|----------|---------------------------|
+|100 |TCP     |allow |10.0.0.0/16|1024-65535|Ephemeral return to VPC-A  |
+|110 |TCP     |allow |0.0.0.0/0  |443       |Panorama/updates via NAT GW|
+|120 |ICMP    |allow |10.0.0.0/8 |-         |Ping                       |
+
+### nacl-c-dmz (subnet-c-dmz — NLB-C)
+
+Inbound:
+
+|Rule|Protocol|Action|Source     |Ports     |Purpose              |
+|----|--------|------|-----------|----------|---------------------|
+|100 |TCP     |allow |10.1.2.0/24|443       |From Palo trust ENI  |
+|110 |TCP     |allow |10.0.0.0/16|443,8443  |Mgmt from VPC-A      |
+|120 |TCP     |allow |10.2.2.0/24|1024-65535|Ephemeral from Portal|
+|130 |ICMP    |allow |10.0.0.0/8 |-         |Ping                 |
+
+Outbound:
+
+|Rule|Protocol|Action|Dest       |Ports     |Purpose                       |
+|----|--------|------|-----------|----------|------------------------------|
+|100 |TCP     |allow |10.2.2.0/24|443       |To AppGate Portal             |
+|110 |TCP     |allow |10.1.2.0/24|1024-65535|Ephemeral return to Palo trust|
+|120 |TCP     |allow |10.0.0.0/16|1024-65535|Ephemeral return to VPC-A     |
+|130 |ICMP    |allow |10.0.0.0/8 |-         |Ping                          |
+
+### nacl-c-portal (subnet-c-portal — AppGate Portal / C1)
+
+Inbound:
+
+|Rule|Protocol|Action|Source     |Ports     |Purpose                       |
+|----|--------|------|-----------|----------|------------------------------|
+|100 |TCP     |allow |10.2.1.0/24|443,80    |From NLB-C                    |
+|110 |TCP     |allow |10.0.0.0/16|8443      |Controller admin from VPC-A   |
+|120 |TCP     |allow |0.0.0.0/0  |1024-65535|Ephemeral return (IdP, NAT GW)|
+|130 |ICMP    |allow |10.0.0.0/8 |-         |Ping                          |
+
+Outbound:
+
+|Rule|Protocol|Action|Dest       |Ports     |Purpose                     |
+|----|--------|------|-----------|----------|----------------------------|
+|100 |TCP     |allow |10.2.1.0/24|1024-65535|Ephemeral return to NLB-C   |
+|110 |TCP     |allow |10.0.0.0/16|1024-65535|Ephemeral return to VPC-A   |
+|120 |TCP     |allow |0.0.0.0/0  |443       |IdP/license calls via NAT GW|
+|130 |ICMP    |allow |10.0.0.0/8 |-         |Ping                        |
+
+### nacl-d-private (subnet-d-private — Customer Sim)
+
+Inbound:
+
+|Rule|Protocol|Action|Source     |Ports     |Purpose                    |
+|----|--------|------|-----------|----------|---------------------------|
+|100 |TCP     |allow |10.1.0.0/16|22        |SSH hop from VPC-B         |
+|110 |TCP     |allow |10.1.0.0/16|1024-65535|HTTP/S return from B1/NLB-B|
+|120 |TCP     |allow |10.2.0.0/16|1024-65535|HTTPS return from C1/NLB-C |
+|130 |ICMP    |allow |10.1.0.0/16|-         |Ping from VPC-B            |
+
+Outbound:
+
+|Rule|Protocol|Action|Dest       |Ports     |Purpose                 |
+|----|--------|------|-----------|----------|------------------------|
+|100 |TCP     |allow |10.1.0.0/16|80,443    |To NLB-B / Palo         |
+|110 |TCP     |allow |10.2.0.0/16|443       |To NLB-C / AppGate      |
+|120 |TCP     |allow |10.1.0.0/16|1024-65535|Ephemeral return for SSH|
+|130 |ICMP    |allow |10.1.0.0/16|-         |Ping                    |
+
+-----
+
+## Instance Changes
+
+|Instance       |Change                 |New Subnet        |New Fixed IP                     |
+|---------------|-----------------------|------------------|---------------------------------|
+|A1 Windows     |No change              |subnet-a-public   |10.0.1.10                        |
+|A2 Linux       |No change              |subnet-a-public   |10.0.1.20                        |
+|B1 Palo sim    |Split into 3 ENIs      |untrust/trust/mgmt|10.1.1.10 / 10.1.2.10 / 10.1.3.10|
+|C1 AppGate sim |Move to subnet-c-portal|subnet-c-portal   |10.2.2.10                        |
+|D1 Customer sim|No change              |subnet-d-private  |10.3.1.10                        |
+
+B1 and C1 will be DESTROYED AND RECREATED by terraform apply.
+This is expected. Review the plan carefully before confirming.
+
+-----
+
+## Module Placement
+
+|Resource                                                           |Module                                     |
+|-------------------------------------------------------------------|-------------------------------------------|
+|New subnets (B untrust/trust/mgmt, C dmz/portal/gateway/controller)|`modules/network`                          |
+|IGW for VPC-B (igw-b)                                              |`modules/network`                          |
+|Route tables for all new subnets                                   |`modules/network`                          |
+|TGW route table updates (default routes)                           |`modules/network`                          |
+|NAT Gateway + EIP                                                  |`modules/network`                          |
+|ALB + listener + ACM cert + target group                           |`modules/network` or `modules/loadbalancer`|
+|NLB-B + NLB-C + listeners + target groups                          |same as ALB                                |
+|VPC Flow Logs + CloudWatch log group + IAM role                    |`modules/network`                          |
+|Palo ENIs (3x aws_network_interface)                               |`modules/compute`                          |
+|B1 instance refactor (3 ENI attachments)                           |`modules/compute`                          |
+|C1 instance move to subnet-c-portal                                |`modules/compute`                          |
+|All updated security groups                                        |`modules/security`                         |
+|All updated NACLs                                                  |`modules/network`                          |
+
+-----
+
+## Web Searches Required Before Writing Any Code
+
+Perform ALL of these before writing a single resource block:
+
+1. `aws_network_interface source_dest_check terraform 2024`
+   Confirm ENI-level source_dest_check syntax for standalone ENIs
+1. `aws_instance network_interface block device_index terraform`
+   Confirm syntax for attaching pre-created ENIs to EC2 instance
+1. `palo alto vm-series aws three nic eth0 eth1 eth2 deployment`
+   Confirm device_index ordering (untrust=0, trust=1, mgmt=2)
+1. `aws_eip network_interface association terraform depends_on igw`
+   Confirm EIP association to ENI with correct dependency chain
+1. `aws_lb internet-facing ALB HTTPS ACM certificate terraform 2024`
+   Confirm ALB resource arguments and HTTPS listener with ACM cert
+1. `aws_lb internal NLB network load balancer TCP target group terraform`
+   Confirm NLB internal scheme and TCP protocol target group
+1. `aws_nat_gateway terraform eip depends_on internet_gateway`
+   Confirm NAT GW + EIP ordering and dependency
+1. `aws_flow_log vpc cloudwatch iam role terraform`
+   Confirm flow log IAM role and CloudWatch log destination syntax
+1. `aws ec2 transit gateway default route 0.0.0.0/0 static route terraform`
+   Confirm TGW static default route syntax for centralized egress
+1. `aws_internet_gateway multiple vpcs terraform attach`
+   Confirm that a separate IGW must be created and attached to VPC-B
+
+-----
+
+## Complete Connectivity Test Matrix
+
+Run ALL of these after apply and record every result.
+
+### Palo MGMT access from VPC-A (management isolation)
+
+```bash
+# From A2: SSH to Palo MGMT ENI — MUST WORK
+ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.3.10
+# Expected: PASS — this is the management path
+
+# From D1 (via B1 hop): attempt SSH to Palo MGMT — MUST FAIL
+ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.3.10
+# Expected: FAIL — customers cannot reach mgmt plane
+```
+
+### Customer path (D1 simulating browser customer via TGW2)
+
+```bash
+# From D1: reach NLB-B (Palo sim) — MUST WORK
+curl -s -o /dev/null -w "%{http_code}" http://<NLB_B_DNS>
+curl -sk -o /dev/null -w "%{http_code}" https://<NLB_B_DNS>
+# Expected: 200 both — Palo is reachable, traffic inspected
+
+# From D1: reach NLB-C (AppGate Portal sim) — MUST WORK
+curl -sk -o /dev/null -w "%{http_code}" https://<NLB_C_DNS>
+# Expected: 200 — Portal is reachable after passing through Palo
+
+# From D1: reach VPC-A directly — MUST FAIL
+curl -s --connect-timeout 5 http://10.0.1.10
+# Expected: 000 — no shared TGW, management plane isolated
+```
+
+### Management browser path (A1 Chrome / A2 curl via TGW1)
+
+```bash
+# From A2: reach NLB-B — MUST WORK
+curl -s -o /dev/null -w "%{http_code}" http://<NLB_B_DNS>
+curl -sk -o /dev/null -w "%{http_code}" https://<NLB_B_DNS>
+# Expected: 200
+
+# From A2: reach NLB-C — MUST WORK
+curl -sk -o /dev/null -w "%{http_code}" https://<NLB_C_DNS>
+# Expected: 200
+
+# From A2: reach D1 directly — MUST FAIL
+curl -s --connect-timeout 5 http://10.3.1.10
+# Expected: 000 — no TGW1 route to VPC-D
+```
+
+### Centralized egress (private instances reach internet via NAT GW)
+
+```bash
+# From B1 MGMT ENI (SSH in from A2 → B1 10.1.3.10): curl internet
+curl -s --connect-timeout 10 https://checkip.amazonaws.com
+# Expected: returns NAT GW EIP — confirms hairpin through VPC-A works
+
+# From C1 (SSH in from A2 → C1 10.2.2.10): curl internet
+curl -s --connect-timeout 10 https://checkip.amazonaws.com
+# Expected: returns NAT GW EIP
+```
+
+### source_dest_check validation (CRITICAL for Palo sim)
+
+```bash
+aws ec2 describe-network-interfaces \
+  --filters "Name=attachment.instance-id,Values=<B1_ID>" \
+  --query 'NetworkInterfaces[*].{
+      ENI:NetworkInterfaceId,
+      PrivateIP:PrivateIpAddress,
+      SourceDestCheck:SourceDestCheck,
+      DeviceIndex:Attachment.DeviceIndex
+    }' \
+  --output table --region us-east-1
+# Expected:
+#   DeviceIndex 0 (untrust, 10.1.1.10) → SourceDestCheck: false
+#   DeviceIndex 1 (trust,   10.1.2.10) → SourceDestCheck: false
+#   DeviceIndex 2 (mgmt,    10.1.3.10) → SourceDestCheck: true
+```
+
+### Load balancer validation
+
+```bash
+aws elbv2 describe-load-balancers \
+  --query 'LoadBalancers[*].{Name:LoadBalancerName,Scheme:Scheme,Type:Type,State:State.Code}' \
+  --output table --region us-east-1
+# Expected:
+#   ALB → internet-facing, application, active
+#   NLB-B → internal, network, active
+#   NLB-C → internal, network, active
+
+aws elbv2 describe-target-health \
+  --target-group-arn <TG_ARN> \
+  --query 'TargetHealthDescriptions[*].{Target:Target.Id,Port:Target.Port,Health:TargetHealth.State}' \
+  --output table --region us-east-1
+# Expected: all targets healthy
+```
+
+-----
+
+## What You Must NOT Do
+
+- Do not give any public IP to B1 trust/mgmt ENIs, C1, or D1
+- Do not add an IGW to VPC-C or VPC-D — they have no internet-facing resources
+- Do not make NLB-B or NLB-C internet-facing (scheme must be internal)
+- Do not define Palo ENIs inline in the instance block — use standalone resources
+- Do not set source_dest_check = false on the MGMT ENI — only untrust and trust
+- Do not put the NAT Gateway in VPC-B, C, or D
+- Do not route customer traffic through VPC-A — NAT GW is management egress only
+- Do not add a route from VPC-D to VPC-A — management isolation must hold
+- Do not add VPC peering between any VPCs — all routing goes through TGW
+- Do not skip terraform plan review — B1 and C1 will be destroyed/recreated
+- Do not apply if terraform plan shows unexpected destroys beyond B1 and C1
+
+-----
+
+## Report
+
+Write to:
+
+```
+artifacts/results/YYYY-MM-DD_complete-architecture-refactor.md
+```
+
+Sections required:
+
+1. All web search queries and what each confirmed or corrected
+1. Full terraform plan summary (counts of add/change/destroy)
+1. Confirmation that B1 has 3 ENIs with correct source_dest_check values
+1. All load balancer scheme and state confirmations
+1. All target group health check results
+1. Complete connectivity test matrix with actual HTTP response codes
+1. NAT GW EIP confirmation from B1 and C1 internet checks
+1. Any deviation from expected results with root cause analysis
+1. Recommendations for any gaps found
+
+-----
+
+## ADDENDUM: AppGate Stack Instances (Controller, Gateway, Portal)
+
+VPC-C must have three separate EC2 instances simulating the real AppGate
+SDP collective. The previous single C1 instance is replaced by three
+purpose-specific instances, each in its correct subnet with the correct
+ports, roles, and HTML page identifying what it simulates.
+
+-----
+
+### AppGate Collective — Role Reference
+
+|Appliance |Role                                |Real Function                                                                                                                                  |
+|----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+|Controller|Policy Administrator + Policy Engine|Authenticates users, evaluates entitlements, issues session tokens. Admin UI on port 8443. Peer port 444. Never directly in customer data path.|
+|Gateway   |Policy Enforcement Point            |Enforces per-user micro-tunnels. All customer data traffic flows through here. Port 443 (tunnel).                                              |
+|Portal    |Clientless Browser Access           |Receives customer browser sessions. Performs SPA on behalf of browser users. Port 443 (HTTPS). Fronted by NLB-C.                               |
+
+The AppGate SDP Controller offers Policy Administrator and Policy Engine functionality, while Gateways act as the Policy Enforcement Point.
+The controller admin interface runs on port 8443, or port 444 if using the peer interface.
+
+-----
+
+### Instance Definitions
+
+#### c1-portal — AppGate Portal Sim
+
+```
+Subnet:     subnet-c-portal (10.2.2.0/24)
+Fixed IP:   10.2.2.10
+Type:       t3.micro
+Public IP:  No
+Purpose:    Receives proxied customer browser sessions from NLB-C.
+            Simulates clientless browser-based Zero Trust access point.
+            This is the instance NLB-C targets on port 443 and 80.
+
+Ports (ingress from NLB-C subnet 10.2.1.0/24):
+  TCP 80   — HTTP (redirect sim)
+  TCP 443  — HTTPS (customer browser sessions via Portal)
+
+Ports (ingress from VPC-A 10.0.0.0/16):
+  TCP 8443 — Admin UI access from management bastion
+
+user_data: nginx with self-signed TLS cert, HTML page identifying role
+```
+
+HTML page content for c1-portal:
+
+```html
+<title>VPC-C | AppGate SDP — Portal</title>
+Role: Clientless Browser Access Point
+Subnet: subnet-c-portal | 10.2.2.10
+Function: Receives customer browser sessions. Performs SPA on
+          customer's behalf. No AppGate client required on endpoint.
+Reachable from: VPC-B trust side via TGW1 (post-Palo inspection)
+NOT reachable from: Internet directly, VPC-A (except admin port 8443)
+```
+
+#### c2-gateway — AppGate Gateway Sim
+
+```
+Subnet:     subnet-c-gateway (10.2.3.0/24)
+Fixed IP:   10.2.3.10
+Type:       t3.micro
+Public IP:  No
+Purpose:    Simulates the AppGate Gateway — Policy Enforcement Point.
+            In production, customer data tunnels flow through here.
+            Per-user encrypted micro-tunnel enforcement.
+
+Ports (ingress from subnet-c-portal 10.2.2.0/24):
+  TCP 443  — Tunnel traffic from Portal to Gateway
+
+Ports (ingress from VPC-A 10.0.0.0/16):
+  TCP 8443 — Admin UI
+  TCP 444  — Peer interface (appliance-to-appliance communication)
+  TCP 22   — SSH from management bastion
+
+Ports (ingress from subnet-c-controller 10.2.4.0/24):
+  ALL      — Controller-to-Gateway internal collective communication
+
+user_data: nginx with self-signed TLS cert, HTML page identifying role
+```
+
+HTML page content for c2-gateway:
+
+```html
+<title>VPC-C | AppGate SDP — Gateway</title>
+Role: Policy Enforcement Point
+Subnet: subnet-c-gateway | 10.2.3.10
+Function: Enforces per-user encrypted micro-tunnels ("segment of one").
+          Customer data flows through here after Portal authentication.
+          Only entitled resources visible — everything else cloaked.
+Reachable from: Portal (10.2.2.0/24), Controller (10.2.4.0/24), VPC-A mgmt
+NOT reachable from: Internet, VPC-D directly
+```
+
+#### c3-controller — AppGate Controller Sim
+
+```
+Subnet:     subnet-c-controller (10.2.4.0/24)
+Fixed IP:   10.2.4.10
+Type:       t3.micro
+Public IP:  No
+Purpose:    Simulates the AppGate Controller — Policy Administrator
+            and Policy Engine. Authenticates users, evaluates context,
+            issues session tokens to Gateway. Never in customer data path.
+
+Ports (ingress from VPC-A 10.0.0.0/16):
+  TCP 8443 — Admin UI (primary management interface)
+  TCP 444  — Peer interface
+  TCP 22   — SSH from management bastion
+
+Ports (ingress from ALL AppGate subnets — internal collective):
+  TCP 444  — Peer communication (Portal → Controller, Gateway → Controller)
+  TCP 8443 — Intra-collective admin
+
+user_data: nginx with self-signed TLS cert, HTML page identifying role
+```
+
+HTML page content for c3-controller:
+
+```html
+<title>VPC-C | AppGate SDP — Controller</title>
+Role: Policy Administrator + Policy Engine
+Subnet: subnet-c-controller | 10.2.4.10
+Function: Authenticates users via IdP (MFA). Evaluates entitlements
+          and context. Issues session tokens to Gateway.
+          NEVER in customer data path — control plane only.
+Admin UI: https://10.2.4.10:8443 (reachable from VPC-A only)
+Peer port: 444 (appliance-to-appliance communication)
+Reachable from: VPC-A management only (ports 8443, 444, 22)
+NOT reachable from: Internet, VPC-D, customer path
+```
+
+-----
+
+### NLB-C Target Update
+
+NLB-C targets c1-portal ONLY. Gateway and Controller are not
+fronted by NLB-C — they are not in the customer data path.
+
+```
+NLB-C listeners:
+  TCP 443 → Target Group → c1-portal (10.2.2.10) port 443
+  TCP 80  → Target Group → c1-portal (10.2.2.10) port 80
+```
+
+Controller admin UI (port 8443) is accessed directly from A1/A2
+via TGW1 — it does not go through NLB-C.
+
+-----
+
+### Security Group Updates for AppGate Stack
+
+#### sg-c1-portal
+
+```
+Ingress: TCP 80, 443  from 10.2.1.0/24  (from NLB-C)
+Ingress: TCP 8443     from 10.0.0.0/16  (admin UI from VPC-A)
+Ingress: TCP 443      from 10.2.3.0/24  (Gateway → Portal return)
+Ingress: ICMP         from 10.0.0.0/8
+Egress:  TCP 443      to 10.2.3.0/24    (Portal → Gateway tunnel)
+Egress:  TCP 444,8443 to 10.2.4.0/24    (Portal → Controller peer)
+Egress:  TCP 443      to 0.0.0.0/0      (IdP calls via NAT GW)
+Egress:  TCP 1024-65535 to 10.2.1.0/24  (ephemeral return to NLB-C)
+```
+
+#### sg-c2-gateway
+
+```
+Ingress: TCP 443      from 10.2.2.0/24  (tunnel from Portal)
+Ingress: TCP 8443,444 from 10.0.0.0/16  (admin from VPC-A)
+Ingress: TCP 22       from 10.0.0.0/16  (SSH from VPC-A)
+Ingress: ALL          from 10.2.4.0/24  (Controller collective)
+Ingress: ICMP         from 10.0.0.0/8
+Egress:  TCP 443      to 10.2.2.0/24    (return to Portal)
+Egress:  TCP 444,8443 to 10.2.4.0/24    (Gateway → Controller peer)
+Egress:  TCP 443      to 0.0.0.0/0      (license/updates via NAT GW)
+```
+
+#### sg-c3-controller
+
+```
+Ingress: TCP 8443,444 from 10.0.0.0/16  (admin from VPC-A only)
+Ingress: TCP 22       from 10.0.0.0/16  (SSH from VPC-A)
+Ingress: TCP 444,8443 from 10.2.2.0/24  (Portal → Controller)
+Ingress: TCP 444,8443 from 10.2.3.0/24  (Gateway → Controller)
+Ingress: ICMP         from 10.0.0.0/8
+Egress:  TCP 444,8443 to 10.2.2.0/24    (Controller → Portal)
+Egress:  TCP 444,8443 to 10.2.3.0/24    (Controller → Gateway)
+Egress:  TCP 443      to 0.0.0.0/0      (IdP, license via NAT GW)
+Egress:  TCP 1024-65535 to 10.0.0.0/16  (ephemeral return to VPC-A)
+```
+
+-----
+
+### NACL Updates for AppGate Subnets
+
+#### nacl-c-gateway (subnet-c-gateway 10.2.3.0/24)
+
+Inbound:
+
+|Rule|Protocol|Source     |Ports      |Purpose                  |
+|----|--------|-----------|-----------|-------------------------|
+|100 |TCP     |10.2.2.0/24|443        |Tunnel from Portal       |
+|110 |TCP     |10.0.0.0/16|8443,444,22|Mgmt from VPC-A          |
+|120 |TCP     |10.2.4.0/24|all        |Controller collective    |
+|130 |TCP     |0.0.0.0/0  |1024-65535 |Ephemeral return (NAT GW)|
+|140 |ICMP    |10.0.0.0/8 |-          |Ping                     |
+
+Outbound:
+
+|Rule|Protocol|Dest       |Ports     |Purpose                   |
+|----|--------|-----------|----------|--------------------------|
+|100 |TCP     |10.2.2.0/24|1024-65535|Ephemeral return to Portal|
+|110 |TCP     |10.2.4.0/24|444,8443  |To Controller             |
+|120 |TCP     |0.0.0.0/0  |443       |License/updates via NAT GW|
+|130 |TCP     |10.0.0.0/16|1024-65535|Ephemeral return to VPC-A |
+|140 |ICMP    |10.0.0.0/8 |-         |Ping                      |
+
+#### nacl-c-controller (subnet-c-controller 10.2.4.0/24)
+
+Inbound:
+
+|Rule|Protocol|Source     |Ports      |Purpose         |
+|----|--------|-----------|-----------|----------------|
+|100 |TCP     |10.0.0.0/16|8443,444,22|Admin from VPC-A|
+|110 |TCP     |10.2.2.0/24|444,8443   |From Portal     |
+|120 |TCP     |10.2.3.0/24|444,8443   |From Gateway    |
+|130 |TCP     |0.0.0.0/0  |1024-65535 |Ephemeral return|
+|140 |ICMP    |10.0.0.0/8 |-          |Ping            |
+
+Outbound:
+
+|Rule|Protocol|Dest       |Ports     |Purpose                    |
+|----|--------|-----------|----------|---------------------------|
+|100 |TCP     |10.2.2.0/24|1024-65535|Ephemeral return to Portal |
+|110 |TCP     |10.2.3.0/24|1024-65535|Ephemeral return to Gateway|
+|120 |TCP     |10.0.0.0/16|1024-65535|Ephemeral return to VPC-A  |
+|130 |TCP     |0.0.0.0/0  |443       |IdP/license via NAT GW     |
+|140 |ICMP    |10.0.0.0/8 |-         |Ping                       |
+
+-----
+
+### Updated Instance Summary for VPC-C
+
+|Instance     |Old Name|New Name     |Subnet             |Fixed IP |Role                  |
+|-------------|--------|-------------|-------------------|---------|----------------------|
+|c1-portal    |C1      |c1-portal    |subnet-c-portal    |10.2.2.10|AppGate Portal sim    |
+|c2-gateway   |(new)   |c2-gateway   |subnet-c-gateway   |10.2.3.10|AppGate Gateway sim   |
+|c3-controller|(new)   |c3-controller|subnet-c-controller|10.2.4.10|AppGate Controller sim|
+
+The old single C1 instance is replaced entirely by c1-portal.
+c2-gateway and c3-controller are net new instances.
+
+-----
+
+### Updated Connectivity Test Matrix — AppGate Stack
+
+```bash
+# From A2: access Controller admin UI — MUST WORK (mgmt path)
+curl -sk -o /dev/null -w "%{http_code}" https://10.2.4.10:8443
+# Expected: 200 or 302 — Controller admin reachable from VPC-A
+
+# From A2: access Gateway admin — MUST WORK
+curl -sk -o /dev/null -w "%{http_code}" https://10.2.3.10:8443
+# Expected: 200
+
+# From A2: access Portal via NLB-C — MUST WORK
+curl -sk -o /dev/null -w "%{http_code}" https://<NLB_C_DNS>
+# Expected: 200 — Portal page loads
+
+# From D1: access Portal via NLB-C — MUST WORK (customer path)
+curl -sk -o /dev/null -w "%{http_code}" https://<NLB_C_DNS>
+# Expected: 200
+
+# From D1: access Controller directly — MUST FAIL (not in customer path)
+curl -sk --connect-timeout 5 https://10.2.4.10:8443
+# Expected: 000 — Controller not reachable from customer segment
+
+# From D1: access Gateway directly — MUST FAIL (no direct route)
+curl -sk --connect-timeout 5 https://10.2.3.10:443
+# Expected: 000 — Gateway not directly reachable from VPC-D
+
+# From c1-portal: reach c2-gateway — MUST WORK (internal collective)
+# SSH into A2 → SSH to c1-portal (10.2.2.10) → then:
+curl -sk -o /dev/null -w "%{http_code}" https://10.2.3.10
+# Expected: 200 — Portal can reach Gateway
+
+# From c1-portal: reach c3-controller — MUST WORK (collective)
+curl -sk -o /dev/null -w "%{http_code}" https://10.2.4.10:8443
+# Expected: 200
+
+# Centralized egress from AppGate instances via NAT GW
+# From c1-portal, c2-gateway, c3-controller:
+curl -s --connect-timeout 10 https://checkip.amazonaws.com
+# Expected: NAT GW EIP — confirms internet egress works for IdP/license calls
+```
+
+-----
+
+### Updated Resource Count Delta (AppGate Addendum)
+
+|Resource              |Added by this addendum                |
+|----------------------|--------------------------------------|
+|EC2 Instances         |+2 (c2-gateway, c3-controller)        |
+|Security Groups       |+2 (sg-c2-gateway, sg-c3-controller)  |
+|NACLs                 |+2 (nacl-c-gateway, nacl-c-controller)|
+|HTML pages (user_data)|+2                                    |
+
+Existing c1-portal replaces old C1 — no net change there, just rename and move.
+
+Total addendum additions: ~6 new resources on top of the 44 in the main prompt.
+
+-----
+
+## Execution Model — What Copilot Does vs What the Operator Does
+
+This task is being executed by GitHub Copilot in VS Code.
+Copilot WRITES and VALIDATES code. It does NOT run CLI commands,
+does NOT execute terraform, and does NOT have AWS credentials.
+
+### Copilot’s Responsibilities (in VS Code)
+
+- Read all skill and instruction files
+- Web-search to validate all resource arguments before writing
+- Write all Terraform resource blocks across the correct modules
+- Run `terraform fmt` and `terraform validate` locally in the terminal
+- Run `terraform plan` and present the full plan output for operator review
+- Write the handoff prompt (see below)
+- Write the pre-flight report to `artifacts/results/`
+
+### Operator’s Responsibilities (you, in your terminal after Copilot finishes)
+
+- Review the terraform plan Copilot produces
+- Run `terraform apply` after confirming the plan
+- Run all AWS CLI validation commands from the test matrix
+- Perform manual browser validation on A1 Windows (RDP)
+- Confirm connectivity test results match expected outcomes
+
+Copilot must NEVER attempt to run `terraform apply` or any
+`aws` CLI command. Those are operator actions only.
+
+-----
+
+## Copilot Terminal Access — What Is Allowed
+
+Copilot MAY use the VS Code terminal for:
+
+```bash
+terraform fmt -recursive          # format check
+terraform validate                # syntax validation
+terraform plan -out=tfplan        # plan only — never apply
+```
+
+Copilot must NOT run:
+
+```bash
+terraform apply                   # operator only
+terraform destroy                 # operator only
+aws ec2 describe-*                # operator only
+aws elbv2 *                       # operator only
+aws ec2 get-password-data         # operator only
+```
+
+-----
+
+## Pre-Flight Report
+
+Before writing the handoff prompt, Copilot must write a pre-flight
+report to:
+
+```
+artifacts/results/YYYY-MM-DD_pre-flight-refactor.md
+```
+
+This report must include:
+
+```markdown
+# Pre-Flight Report: Complete Architecture Refactor
+Date: YYYY-MM-DD
+Author: GitHub Copilot (VS Code)
+
+## Web Search Validations
+| Query | Finding | Impact on Code |
+|-------|---------|----------------|
+| <query> | <what was confirmed or corrected> | <any change made> |
+
+## terraform fmt
+Result: PASS / FAIL
+Details: <any formatting issues found and fixed>
+
+## terraform validate
+Result: PASS / FAIL
+Details: <any syntax errors found and fixed>
+
+## terraform plan Summary
+Resources to add:    <count>
+Resources to change: <count>
+Resources to destroy: <count>
+
+Expected destroys (B1, C1 — subnet moves force recreation): 2
+If destroy count exceeds 2: STOP and explain before operator proceeds.
+
+## Plan — Notable Changes
+<list any destroy/recreate resources and why>
+<list any unexpected changes>
+
+## Resource Verification Checklist
+- [ ] igw-b created and attached to VPC-B
+- [ ] subnet-b-untrust, subnet-b-trust, subnet-b-mgmt created
+- [ ] subnet-c-dmz, subnet-c-portal, subnet-c-gateway, subnet-c-controller created
+- [ ] 3x aws_network_interface for Palo (untrust/trust/mgmt)
+- [ ] source_dest_check = false on untrust and trust ENIs confirmed in plan
+- [ ] source_dest_check = true on mgmt ENI confirmed in plan
+- [ ] ALB scheme = internet-facing confirmed in plan
+- [ ] NLB-B scheme = internal confirmed in plan
+- [ ] NLB-C scheme = internal confirmed in plan
+- [ ] NAT Gateway in subnet-a-public confirmed in plan
+- [ ] TGW1 default route 0.0.0.0/0 → VPC-A attachment confirmed
+- [ ] TGW2 default route 0.0.0.0/0 → VPC-B attachment confirmed
+- [ ] c1-portal at 10.2.2.10 in subnet-c-portal
+- [ ] c2-gateway at 10.2.3.10 in subnet-c-gateway
+- [ ] c3-controller at 10.2.4.10 in subnet-c-controller
+- [ ] VPC Flow Logs on VPC-A confirmed in plan
+- [ ] No public IPs on c1-portal, c2-gateway, c3-controller, D1
+
+## Issues Found
+<any deviations, conflicts, or concerns>
+
+## Ready for Operator Apply
+YES / NO — and reason if NO
+```
+
+-----
+
+## Handoff Prompt
+
+After completing all code writing, formatting, validation, planning,
+and the pre-flight report, Copilot must write a handoff prompt to:
+
+```
+artifacts/OPERATOR-HANDOFF-APPLY.md
+```
+
+This handoff prompt is what the operator uses to run the deployment
+and validate it after `terraform apply`. It must be self-contained —
+the operator should be able to follow it without reading any other file.
+
+Copilot must write the handoff prompt with ALL real values filled in
+from the terraform plan output — real resource names, real IPs where
+known, real module paths. Do not use placeholders like `<REGION>` —
+fill them in from the actual configuration.
+
+The handoff prompt must contain the following sections:
+
+```markdown
+# Operator Handoff — Complete Architecture Refactor
+Date: YYYY-MM-DD
+Prepared by: GitHub Copilot (VS Code)
+Status: Ready for operator apply
+
+## What Was Built
+<2-3 sentence summary of what changed>
+
+## Pre-Apply Checklist (operator confirms before running apply)
+- [ ] AWS credentials configured and pointing to correct account
+- [ ] Correct region set (us-east-1)
+- [ ] backend.hcl present and correct
+- [ ] tgw-lab-key.pem available locally
+- [ ] terraform plan has been reviewed (see artifacts/results/pre-flight report)
+- [ ] Destroy count in plan is 2 or fewer (B1 and C1 expected)
+
+## Apply Command
+cd environments/dev
+terraform init -backend-config=backend.hcl
+terraform apply tfplan
+
+## Expected Apply Duration
+- NAT Gateway: ~2 minutes
+- ALB/NLB provisioning: ~3 minutes
+- EC2 instance recreation (B1, C1): ~3 minutes
+- TGW route updates: ~1 minute
+Total estimated: ~10 minutes
+
+## Post-Apply — Get Connection Details
+terraform output
+terraform output -json > artifacts/results/outputs-YYYY-MM-DD.json
+
+## Windows RDP (A1) — Decrypt Password
+<exact CLI command from terraform output rdp_password_decrypt_command>
+
+RDP to: <a1_public_ip>:3389
+Username: Administrator
+
+## Linux SSH (A2)
+ssh -i tgw-lab-key.pem ec2-user@<a2_public_ip>
+
+## AWS CLI Validation Commands
+Run these in order after apply completes.
+
+### 1. Confirm all instances running
+aws ec2 describe-instances \
+  --filters "Name=tag:Name,Values=lab-*" \
+            "Name=instance-state-name,Values=running" \
+  --query 'Reservations[*].Instances[*].{
+      Name:Tags[?Key==`Name`]|[0].Value,
+      ID:InstanceId,
+      PrivateIP:PrivateIpAddress,
+      PublicIP:PublicIpAddress,
+      State:State.Name}' \
+  --output table --region us-east-1
+
+### 2. Confirm source_dest_check on Palo ENIs
+aws ec2 describe-network-interfaces \
+  --filters "Name=attachment.instance-id,Values=<B1_INSTANCE_ID>" \
+  --query 'NetworkInterfaces[*].{
+      PrivateIP:PrivateIpAddress,
+      SourceDestCheck:SourceDestCheck,
+      DeviceIndex:Attachment.DeviceIndex}' \
+  --output table --region us-east-1
+# Expected: DeviceIndex 0 and 1 → false, DeviceIndex 2 → true
+
+### 3. Confirm load balancers
+aws elbv2 describe-load-balancers \
+  --query 'LoadBalancers[*].{
+      Name:LoadBalancerName,
+      Scheme:Scheme,
+      Type:Type,
+      State:State.Code,
+      DNS:DNSName}' \
+  --output table --region us-east-1
+# Expected: ALB=internet-facing, NLB-B=internal, NLB-C=internal, all active
+
+### 4. Confirm target group health (wait 2-3 min after apply)
+<exact commands with real TG ARNs filled in from terraform output>
+
+### 5. Confirm NAT Gateway available
+aws ec2 describe-nat-gateways \
+  --filter Name=state,Values=available \
+  --query 'NatGateways[*].{
+      ID:NatGatewayId,
+      Subnet:SubnetId,
+      EIP:NatGatewayAddresses[0].PublicIp,
+      State:State}' \
+  --output table --region us-east-1
+
+### 6. Confirm TGW default routes exist
+aws ec2 search-transit-gateway-routes \
+  --transit-gateway-route-table-id <TGW1_RT_ID> \
+  --filters Name=state,Values=active \
+  --query 'Routes[*].{CIDR:DestinationCidrBlock,Type:Type,State:State}' \
+  --output table --region us-east-1
+# Expected: 0.0.0.0/0 static route present pointing to VPC-A attachment
+
+## Connectivity Test Matrix
+Run all of these from A2 (SSH in first):
+
+### From A2
+ssh -i tgw-lab-key.pem ec2-user@<a2_public_ip>
+
+# Palo MGMT ENI — MUST WORK
+ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.3.10
+curl -sk -o /dev/null -w "%{http_code}" https://10.1.3.10
+
+# NLB-B (Palo sim) — MUST WORK
+curl -s  -o /dev/null -w "%{http_code}" http://<NLB_B_DNS>
+curl -sk -o /dev/null -w "%{http_code}" https://<NLB_B_DNS>
+
+# NLB-C (AppGate Portal) — MUST WORK
+curl -sk -o /dev/null -w "%{http_code}" https://<NLB_C_DNS>
+
+# AppGate Controller admin UI — MUST WORK
+curl -sk -o /dev/null -w "%{http_code}" https://10.2.4.10:8443
+
+# AppGate Gateway — MUST WORK
+curl -sk -o /dev/null -w "%{http_code}" https://10.2.3.10
+
+# VPC-D (D1) direct — MUST FAIL
+curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://10.3.1.10
+
+### From B1 MGMT ENI (SSH: A2 → 10.1.3.10) — centralized egress test
+curl -s --connect-timeout 10 https://checkip.amazonaws.com
+# Expected: <NAT_GW_EIP>
+
+### From c1-portal (SSH: A2 → 10.2.2.10) — AppGate collective test
+curl -sk -o /dev/null -w "%{http_code}" https://10.2.3.10      # Gateway
+curl -sk -o /dev/null -w "%{http_code}" https://10.2.4.10:8443 # Controller
+curl -s --connect-timeout 10 https://checkip.amazonaws.com      # NAT GW egress
+
+### From D1 (SSH: A2 → B1 10.1.2.10 → D1 10.3.1.10)
+curl -sk -o /dev/null -w "%{http_code}" https://<NLB_C_DNS>    # Portal MUST WORK
+curl -s  -o /dev/null -w "%{http_code}" http://<NLB_B_DNS>     # Palo MUST WORK
+curl -sk --connect-timeout 5 https://10.2.4.10:8443             # Controller MUST FAIL
+curl -s  --connect-timeout 5 http://10.0.1.10                   # VPC-A MUST FAIL
+
+### A1 Windows (manual — RDP in, open Chrome)
+http://<NLB_B_DNS>       → Palo Alto NGFW page    MUST LOAD
+https://<NLB_C_DNS>      → AppGate Portal page     MUST LOAD
+https://10.2.4.10:8443   → Controller admin UI     MUST LOAD
+http://10.3.1.10         → D1                      MUST FAIL
+
+## Expected Results Summary
+| Test | Expected | Pass/Fail |
+|------|----------|-----------|
+| A2 → Palo MGMT (10.1.3.10) | PASS | |
+| A2 → NLB-B HTTP | 200 | |
+| A2 → NLB-B HTTPS | 200 | |
+| A2 → NLB-C HTTPS | 200 | |
+| A2 → Controller 8443 | 200 | |
+| A2 → Gateway HTTPS | 200 | |
+| A2 → D1 direct | FAIL/000 | |
+| B1 MGMT → internet | NAT GW EIP | |
+| c1-portal → c2-gateway | 200 | |
+| c1-portal → c3-controller | 200 | |
+| c1-portal → internet | NAT GW EIP | |
+| D1 → NLB-C | 200 | |
+| D1 → NLB-B | 200 | |
+| D1 → Controller direct | FAIL/000 | |
+| D1 → VPC-A direct | FAIL/000 | |
+| A1 Chrome → NLB-B | LOADS | |
+| A1 Chrome → NLB-C | LOADS | |
+| A1 Chrome → Controller | LOADS | |
+
+## Record Results
+After completing all tests, record pass/fail in:
+artifacts/results/YYYY-MM-DD_post-apply-validation.md
+```
