@@ -1,8 +1,13 @@
 aws_region  = "us-east-1"
 name_prefix = "lab-dev"
+public_key  = "ssh-rsa REPLACE_WITH_THE_PUBLIC_KEY_FOR_TGW_LAB"
+
+management_cidrs = [
+  "0.0.0.0/0"
+]
 
 common_tags = {
   Environment = "dev"
-  Project     = "terraform-aws"
+  Project     = "tgw-segmentation-lab"
   Owner       = "replace-me"
 }
