@@ -20,3 +20,8 @@ variable "tags" {
   description = "Common tags applied to network resources."
   default     = {}
 }
+
+variable "alb_security_group_id" {
+  type        = string
+  description = "Security group ID to attach to the internet-facing ALB in VPC-B."
+}
