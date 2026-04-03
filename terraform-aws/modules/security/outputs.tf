@@ -8,7 +8,6 @@ output "security_group_ids" {
   value = {
     a_linux       = aws_security_group.a_linux.id
     a_windows     = aws_security_group.a_windows.id
-    alb           = aws_security_group.alb.id
     palo_untrust  = aws_security_group.palo_untrust.id
     palo_trust    = aws_security_group.palo_trust.id
     palo_mgmt     = aws_security_group.palo_mgmt.id

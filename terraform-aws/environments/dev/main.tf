@@ -26,3 +26,4 @@ module "compute" {
   subnet_ids         = module.network.subnet_ids
   tags               = local.common_tags
 }
+
