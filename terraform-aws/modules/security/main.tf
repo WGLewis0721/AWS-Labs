@@ -6,13 +6,10 @@ resource "aws_default_security_group" "this" {
   ingress = []
   egress  = []
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "default-sg-vpc-${each.key}"
-    }
-  )
+  tags = merge(var.tags, { Name = "default-sg-vpc-${each.key}" })
 }
+
+# ── VPC-A ─────────────────────────────────────────────────────────────────────
 
 resource "aws_security_group" "a_windows" {
   description = "RDP access for the Windows browser host in VPC-A."
@@ -20,27 +17,30 @@ resource "aws_security_group" "a_windows" {
   vpc_id      = var.vpc_ids["a"]
 
   ingress {
-    cidr_blocks = var.management_cidrs
-    description = "RDP from management CIDRs"
+    description = "RDP from operator"
     from_port   = 3389
-    protocol    = "tcp"
     to_port     = 3389
+    protocol    = "tcp"
+    cidr_blocks = var.management_cidrs
+  }
+
+  ingress {
+    description = "ICMP from RFC-1918"
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["10.0.0.0/8"]
   }
 
   egress {
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Internet and lab egress for Windows host"
+    description = "All egress"
     from_port   = 0
-    protocol    = "-1"
     to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "lab-sg-a-windows"
-    }
-  )
+  tags = merge(var.tags, { Name = "lab-sg-a-windows" })
 }
 
 resource "aws_security_group" "a_linux" {
@@ -49,152 +49,594 @@ resource "aws_security_group" "a_linux" {
   vpc_id      = var.vpc_ids["a"]
 
   ingress {
-    cidr_blocks = var.management_cidrs
-    description = "SSH from management CIDRs"
+    description = "SSH from operator"
     from_port   = 22
-    protocol    = "tcp"
     to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.management_cidrs
+  }
+
+  ingress {
+    description = "ICMP from RFC-1918"
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["10.0.0.0/8"]
   }
 
   egress {
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Internet and lab egress for Linux jump host"
+    description = "All egress"
     from_port   = 0
-    protocol    = "-1"
     to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "lab-sg-a-linux"
-    }
-  )
+  tags = merge(var.tags, { Name = "lab-sg-a-linux" })
 }
 
-resource "aws_security_group" "b" {
-  description = "Palo Alto simulation security group."
-  name        = "lab-sg-vpc-b"
+# ── VPC-B ─────────────────────────────────────────────────────────────────────
+
+resource "aws_security_group" "alb" {
+  description = "ALB in subnet-b-untrust (VPC-B)."
+  name        = "lab-sg-alb"
   vpc_id      = var.vpc_ids["b"]
 
   ingress {
-    cidr_blocks = [var.vpc_cidrs["a"], var.vpc_cidrs["c"]]
-    description = "SSH from VPC-A jump host and VPC-C"
-    from_port   = 22
+    description = "HTTPS from internet"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
-    to_port     = 22
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    cidr_blocks = [var.vpc_cidrs["a"], var.vpc_cidrs["c"], var.vpc_cidrs["d"]]
-    description = "HTTP from management, customer, and AppGate segments"
+    description = "HTTP from internet"
     from_port   = 80
-    protocol    = "tcp"
     to_port     = 80
-  }
-
-  ingress {
-    cidr_blocks = [var.vpc_cidrs["a"], var.vpc_cidrs["c"], var.vpc_cidrs["d"]]
-    description = "ICMP from connected segments"
-    from_port   = -1
-    protocol    = "icmp"
-    to_port     = -1
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
-    cidr_blocks = [var.vpc_cidrs["a"], var.vpc_cidrs["c"], var.vpc_cidrs["d"]]
-    description = "Scoped internal egress"
-    from_port   = 0
-    protocol    = "-1"
-    to_port     = 0
+    description = "HTTPS to Palo untrust subnet"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.1.0/24"]
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "lab-sg-vpc-b"
-    }
-  )
+  tags = merge(var.tags, { Name = "lab-sg-alb" })
 }
 
-resource "aws_security_group" "c" {
-  description = "AppGate simulation security group."
-  name        = "lab-sg-vpc-c"
+resource "aws_security_group" "palo_untrust" {
+  description = "Palo Alto UNTRUST ENI (VPC-B)."
+  name        = "lab-sg-palo-untrust"
+  vpc_id      = var.vpc_ids["b"]
+
+  ingress {
+    description = "Customer HTTPS from ALB"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "HTTP redirect"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "ICMP from internal"
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["10.0.0.0/8"]
+  }
+
+  egress {
+    description = "All egress"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, { Name = "lab-sg-palo-untrust" })
+}
+
+resource "aws_security_group" "palo_trust" {
+  description = "Palo Alto TRUST ENI (VPC-B)."
+  name        = "lab-sg-palo-trust"
+  vpc_id      = var.vpc_ids["b"]
+
+  ingress {
+    description = "HTTP from NLB-B"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.1.0/24"]
+  }
+
+  ingress {
+    description = "HTTPS from NLB-B"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.1.0/24"]
+  }
+
+  ingress {
+    description = "HTTP return from AppGate NLB-C"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.1.0/24"]
+  }
+
+  ingress {
+    description = "HTTPS return from AppGate NLB-C"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.1.0/24"]
+  }
+
+  ingress {
+    description = "Ephemeral return from AppGate"
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.0.0/16"]
+  }
+
+  ingress {
+    description = "ICMP from internal"
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["10.0.0.0/8"]
+  }
+
+  egress {
+    description = "Return to VPC-A"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  egress {
+    description = "Toward AppGate (VPC-C)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["10.2.0.0/16"]
+  }
+
+  egress {
+    description = "Return to customer VPC-D"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["10.3.0.0/16"]
+  }
+
+  tags = merge(var.tags, { Name = "lab-sg-palo-trust" })
+}
+
+resource "aws_security_group" "palo_mgmt" {
+  description = "Palo Alto MGMT ENI (VPC-B)."
+  name        = "lab-sg-palo-mgmt"
+  vpc_id      = var.vpc_ids["b"]
+
+  ingress {
+    description = "SSH from VPC-A bastion"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "HTTPS mgmt console from VPC-A"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "ICMP from VPC-A"
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  egress {
+    description = "Return to VPC-A"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  egress {
+    description = "Panorama and license updates via NAT GW"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, { Name = "lab-sg-palo-mgmt" })
+}
+
+# ── VPC-C ─────────────────────────────────────────────────────────────────────
+
+resource "aws_security_group" "c1_portal" {
+  description = "AppGate c1-portal in subnet-c-portal (VPC-C)."
+  name        = "lab-sg-c1-portal"
   vpc_id      = var.vpc_ids["c"]
 
   ingress {
-    cidr_blocks = [var.vpc_cidrs["a"], var.vpc_cidrs["b"]]
-    description = "SSH from VPC-A jump host and VPC-B"
-    from_port   = 22
-    protocol    = "tcp"
-    to_port     = 22
-  }
-
-  ingress {
-    cidr_blocks = [var.vpc_cidrs["a"], var.vpc_cidrs["b"], var.vpc_cidrs["d"]]
-    description = "HTTP from management, customer, and Palo Alto segments"
+    description = "HTTP from NLB-C"
     from_port   = 80
-    protocol    = "tcp"
     to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.1.0/24"]
   }
 
   ingress {
-    cidr_blocks = [var.vpc_cidrs["a"], var.vpc_cidrs["b"], var.vpc_cidrs["d"]]
-    description = "ICMP from connected segments"
+    description = "HTTPS from NLB-C"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.1.0/24"]
+  }
+
+  ingress {
+    description = "Admin UI from VPC-A"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "Gateway to Portal return"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.3.0/24"]
+  }
+
+  ingress {
+    description = "ICMP from RFC-1918"
     from_port   = -1
-    protocol    = "icmp"
     to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["10.0.0.0/8"]
   }
 
   egress {
-    cidr_blocks = [var.vpc_cidrs["a"], var.vpc_cidrs["b"], var.vpc_cidrs["d"]]
-    description = "Scoped internal egress"
-    from_port   = 0
-    protocol    = "-1"
-    to_port     = 0
+    description = "Portal to Gateway tunnel"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.3.0/24"]
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "lab-sg-vpc-c"
-    }
-  )
+  egress {
+    description = "Portal to Controller peer"
+    from_port   = 444
+    to_port     = 444
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.4.0/24"]
+  }
+
+  egress {
+    description = "Portal to Controller peer (8443)"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.4.0/24"]
+  }
+
+  egress {
+    description = "IdP calls via NAT GW"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Ephemeral return to NLB-C"
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.1.0/24"]
+  }
+
+  tags = merge(var.tags, { Name = "lab-sg-c1-portal" })
 }
 
+resource "aws_security_group" "c2_gateway" {
+  description = "AppGate c2-gateway in subnet-c-gateway (VPC-C)."
+  name        = "lab-sg-c2-gateway"
+  vpc_id      = var.vpc_ids["c"]
+
+  ingress {
+    description = "Tunnel from Portal"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.2.0/24"]
+  }
+
+  ingress {
+    description = "Admin from VPC-A"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "Peer interface from VPC-A"
+    from_port   = 444
+    to_port     = 444
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "SSH from VPC-A"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "Controller collective"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["10.2.4.0/24"]
+  }
+
+  ingress {
+    description = "ICMP from RFC-1918"
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["10.0.0.0/8"]
+  }
+
+  egress {
+    description = "Return to Portal"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.2.0/24"]
+  }
+
+  egress {
+    description = "Gateway to Controller peer"
+    from_port   = 444
+    to_port     = 444
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.4.0/24"]
+  }
+
+  egress {
+    description = "Gateway to Controller (8443)"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.4.0/24"]
+  }
+
+  egress {
+    description = "License and updates via NAT GW"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, { Name = "lab-sg-c2-gateway" })
+}
+
+resource "aws_security_group" "c3_controller" {
+  description = "AppGate c3-controller in subnet-c-controller (VPC-C)."
+  name        = "lab-sg-c3-controller"
+  vpc_id      = var.vpc_ids["c"]
+
+  ingress {
+    description = "Admin from VPC-A"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "Peer interface from VPC-A"
+    from_port   = 444
+    to_port     = 444
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "SSH from VPC-A"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "Portal to Controller (444)"
+    from_port   = 444
+    to_port     = 444
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.2.0/24"]
+  }
+
+  ingress {
+    description = "Portal to Controller (8443)"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.2.0/24"]
+  }
+
+  ingress {
+    description = "Gateway to Controller (444)"
+    from_port   = 444
+    to_port     = 444
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.3.0/24"]
+  }
+
+  ingress {
+    description = "Gateway to Controller (8443)"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.3.0/24"]
+  }
+
+  ingress {
+    description = "ICMP from RFC-1918"
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["10.0.0.0/8"]
+  }
+
+  egress {
+    description = "Controller to Portal (444)"
+    from_port   = 444
+    to_port     = 444
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.2.0/24"]
+  }
+
+  egress {
+    description = "Controller to Portal (8443)"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.2.0/24"]
+  }
+
+  egress {
+    description = "Controller to Gateway (444)"
+    from_port   = 444
+    to_port     = 444
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.3.0/24"]
+  }
+
+  egress {
+    description = "Controller to Gateway (8443)"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.3.0/24"]
+  }
+
+  egress {
+    description = "IdP and license via NAT GW"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Ephemeral return to VPC-A"
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  tags = merge(var.tags, { Name = "lab-sg-c3-controller" })
+}
+
+# ── VPC-D ─────────────────────────────────────────────────────────────────────
+
 resource "aws_security_group" "d" {
-  description = "Customer test client security group."
-  name        = "lab-sg-vpc-d"
+  description = "Customer test client in subnet-d-private (VPC-D)."
+  name        = "lab-sg-customer-d1"
   vpc_id      = var.vpc_ids["d"]
 
   ingress {
-    cidr_blocks = [var.vpc_cidrs["b"]]
-    description = "SSH from Palo Alto simulation"
+    description = "SSH hop from VPC-B"
     from_port   = 22
-    protocol    = "tcp"
     to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.0.0/16"]
   }
 
   ingress {
-    cidr_blocks = [var.vpc_cidrs["b"]]
-    description = "ICMP from Palo Alto simulation"
+    description = "HTTP return from B1"
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.0.0/16"]
+  }
+
+  ingress {
+    description = "HTTP return from C1"
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.0.0/16"]
+  }
+
+  ingress {
+    description = "ICMP from VPC-B"
     from_port   = -1
-    protocol    = "icmp"
     to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = ["10.1.0.0/16"]
   }
 
   egress {
-    cidr_blocks = [var.vpc_cidrs["b"], var.vpc_cidrs["c"]]
-    description = "Scoped internal egress to reachable segments"
-    from_port   = 0
-    protocol    = "-1"
-    to_port     = 0
+    description = "HTTP to Palo/NLB-B"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.0.0/16"]
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "lab-sg-vpc-d"
-    }
-  )
+  egress {
+    description = "HTTPS to Palo/NLB-B"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.0.0/16"]
+  }
+
+  egress {
+    description = "HTTPS to AppGate/NLB-C"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.0.0/16"]
+  }
+
+  tags = merge(var.tags, { Name = "lab-sg-customer-d1" })
 }
