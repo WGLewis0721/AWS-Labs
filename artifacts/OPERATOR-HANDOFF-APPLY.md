@@ -98,7 +98,7 @@ aws ec2 get-password-data \
   --query 'PasswordData' --output text \
   --region us-east-1
 
-# RDP to: <a1_windows_public_ip>:3389
+# RDP to: ${A1_IP}:3389
 # Username: Administrator
 # Password: <decrypted above>
 ```
@@ -108,7 +108,7 @@ aws ec2 get-password-data \
 ## Linux SSH (A2)
 
 ```bash
-ssh -i tgw-lab-key.pem ec2-user@<a2_linux_public_ip>
+ssh -i tgw-lab-key.pem ec2-user@${A2_IP}
 ```
 
 ---
@@ -137,11 +137,17 @@ Expected instances and IPs:
 |------|-----------|-----------|
 | lab-a1-windows | 10.0.1.10 | (public) |
 | lab-a2-linux | 10.0.1.20 | (public) |
-| lab-b1-paloalto | 10.1.3.10 (mgmt, primary for SSH) | palo_untrust_eip |
+| lab-b1-paloalto (UNTRUST ENI) | 10.1.1.10 | palo_untrust_eip |
+| lab-b1-paloalto (TRUST ENI)   | 10.1.2.10 | none — use as SSH hop to D1 |
+| lab-b1-paloalto (MGMT ENI)    | 10.1.3.10 | none — SSH from A2 for mgmt |
 | lab-c1-portal | 10.2.2.10 | none |
 | lab-c2-gateway | 10.2.3.10 | none |
 | lab-c3-controller | 10.2.4.10 | none |
 | lab-d1-customer | 10.3.1.10 | none |
+
+Note: SSH to B1 for management tests uses 10.1.3.10 (MGMT ENI).
+SSH hop to D1 uses 10.1.2.10 (TRUST ENI) — the only ENI with a
+TGW2 return path to VPC-D.
 
 ### 2. Confirm Palo Alto ENIs and source_dest_check
 
@@ -266,21 +272,77 @@ aws ec2 search-transit-gateway-routes \
 # Expected: 0.0.0.0/0 static route present (→ VPC-B attachment)
 ```
 
+### 7. Confirm TGW attachment subnets (critical — validates TGW fix)
+
+```bash
+aws ec2 describe-transit-gateway-vpc-attachments \
+  --filters "Name=state,Values=available" \
+  --query 'TransitGatewayVpcAttachments[*].{
+      Name:Tags[?Key==`Name`]|[0].Value,
+      VpcId:VpcId,
+      Subnets:SubnetIds,
+      State:State}' \
+  --output table --region us-east-1
+```
+
+Expected subnet placement:
+
+| Attachment | Must use subnet |
+|------------|----------------|
+| tgw1-attach-vpc-b | subnet-b-trust (10.1.2.x) — NOT b-untrust |
+| tgw2-attach-vpc-b | subnet-b-trust (10.1.2.x) — NOT b-untrust |
+| tgw1-attach-vpc-c | subnet-c-dmz (10.2.1.x) |
+| tgw2-attach-vpc-c | subnet-c-dmz (10.2.1.x) |
+| tgw1-attach-vpc-a | subnet-a (10.0.1.x) |
+| tgw2-attach-vpc-d | subnet-d (10.3.1.x) |
+
+If VPC-B attachment shows any subnet other than 10.1.2.x — STOP.
+The TGW fix was not applied correctly. Do not proceed with
+connectivity tests until this is resolved.
+
 ---
 
 ## Connectivity Test Matrix
 
+**Run these once after terraform apply to populate all test variables:**
+```bash
+# Run these once after terraform apply to populate all test variables
+export NLB_B_DNS=$(terraform output -raw nlb_b_dns_name)
+export NLB_C_DNS=$(terraform output -raw nlb_c_dns_name)
+export ALB_DNS=$(terraform output -raw alb_dns_name)
+export NAT_EIP=$(terraform output -raw nat_gateway_eip)
+export A2_IP=$(terraform output -raw a2_linux_public_ip)
+export A1_IP=$(terraform output -raw a1_windows_public_ip)
+
+echo "NLB_B_DNS : ${NLB_B_DNS}"
+echo "NLB_C_DNS : ${NLB_C_DNS}"
+echo "ALB_DNS   : ${ALB_DNS}"
+echo "NAT_EIP   : ${NAT_EIP}"
+```
+
 **SSH to A2 first:**
 ```bash
-ssh -i tgw-lab-key.pem ec2-user@<a2_linux_public_ip>
+ssh -i tgw-lab-key.pem ec2-user@${A2_IP}
 ```
+
+### From operator laptop — ALB public internet test
+
+Run this from your LOCAL machine (not from A2):
+
+```bash
+ALB_DNS=$(terraform output -raw alb_dns_name)
+
+# Full public internet → ALB → Palo path — MUST return 200
+curl -sk -o /dev/null -w "%{http_code}" https://${ALB_DNS}
+```
+
+Expected: 200
+This is the only test that validates the complete inbound customer path
+end to end from the public internet through the ALB.
 
 ### From A2 — Management path tests
 
 ```bash
-NLB_B_DNS="<nlb_b_dns_name from terraform output>"
-NLB_C_DNS="<nlb_c_dns_name from terraform output>"
-
 # Palo MGMT ENI — MUST WORK
 ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.3.10
 curl -sk -o /dev/null -w "%{http_code}" https://10.1.3.10
@@ -310,7 +372,7 @@ ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.3.10
 
 # Centralized egress via TGW1 → VPC-A → NAT GW
 curl -s --connect-timeout 10 https://checkip.amazonaws.com
-# Expected: returns <nat_gateway_eip>
+# Expected: returns ${NAT_EIP}
 ```
 
 ### From c1-portal — AppGate collective test
@@ -321,7 +383,7 @@ ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.2.10
 
 curl -sk -o /dev/null -w "%{http_code}" https://10.2.3.10        # Gateway — MUST WORK (200)
 curl -sk -o /dev/null -w "%{http_code}" https://10.2.4.10:8443   # Controller — MUST WORK (200)
-curl -s  --connect-timeout 10 https://checkip.amazonaws.com       # NAT GW EIP — MUST return <nat_gateway_eip>
+curl -s  --connect-timeout 10 https://checkip.amazonaws.com       # NAT GW EIP — MUST return ${NAT_EIP}
 ```
 
 ### From D1 — Customer path tests
@@ -330,9 +392,6 @@ curl -s  --connect-timeout 10 https://checkip.amazonaws.com       # NAT GW EIP �
 # SSH: A2 → B1 TRUST ENI (10.1.2.10) → D1
 ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.2.10
 ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.3.1.10
-
-NLB_B_DNS="<nlb_b_dns_name>"
-NLB_C_DNS="<nlb_c_dns_name>"
 
 # NLB-C (Portal via TGW2) — MUST WORK (200)
 curl -sk -o /dev/null -w "%{http_code}" https://${NLB_C_DNS}
@@ -350,8 +409,8 @@ curl -s  --connect-timeout 5 -o /dev/null -w "%{http_code}" http://10.0.1.10
 ### A1 Windows (manual — RDP in, open Chrome)
 
 ```
-http://<nlb_b_dns_name>       → Palo Alto NGFW page     MUST LOAD
-https://<nlb_c_dns_name>      → AppGate Portal page      MUST LOAD (cert warning OK)
+http://${NLB_B_DNS}       → Palo Alto NGFW page     MUST LOAD
+https://${NLB_C_DNS}      → AppGate Portal page      MUST LOAD (cert warning OK)
 https://10.2.4.10:8443        → Controller admin UI      MUST LOAD
 http://10.3.1.10              → D1                       MUST FAIL
 ```
@@ -369,14 +428,15 @@ http://10.3.1.10              → D1                       MUST FAIL
 | A2 → Controller 8443 | 200 | |
 | A2 → Gateway HTTPS | 200 | |
 | A2 → D1 direct | FAIL/000 | |
-| B1 MGMT → internet | `<nat_gateway_eip>` | |
+| B1 MGMT → internet | `${NAT_EIP}` | |
 | c1-portal → c2-gateway | 200 | |
 | c1-portal → c3-controller | 200 | |
-| c1-portal → internet | `<nat_gateway_eip>` | |
+| c1-portal → internet | `${NAT_EIP}` | |
 | D1 → NLB-C | 200 | |
 | D1 → NLB-B | 200 | |
 | D1 → Controller direct | FAIL/000 | |
 | D1 → VPC-A direct | FAIL/000 | |
+| Laptop → ALB HTTPS (public internet) | 200 | |
 | A1 Chrome → NLB-B | LOADS | |
 | A1 Chrome → NLB-C | LOADS | |
 | A1 Chrome → Controller | LOADS | |
