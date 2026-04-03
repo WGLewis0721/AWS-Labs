@@ -23,3 +23,4 @@ variable "tags" {
   description = "Common tags applied to compute resources."
   default     = {}
 }
+
