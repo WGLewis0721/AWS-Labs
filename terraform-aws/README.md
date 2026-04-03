@@ -289,13 +289,56 @@ As of the initial deployment:
 - all terminal-verifiable pass and fail cases matched the intended design
 - the A1 Chrome checks remain a manual operator step
 
-## Destroying the lab
+## Teardown and cost cleanup
 
-To tear the environment down:
+Use [teardown.ps1](C:/Users/Willi/projects/Labs/terraform-aws/scripts/teardown.ps1) when you want to remove the lab and stop ongoing AWS charges.
 
-```bash
-cd terraform-aws/environments/dev
-terraform destroy
+By default, the teardown script removes:
+
+- EC2 instances and their attached root volumes
+- VPCs, subnets, route tables, Internet Gateway, security groups, and NACLs
+- both Transit Gateways and all TGW attachments
+- the remote Terraform backend bucket and DynamoDB lock table
+
+The script intentionally does not remove:
+
+- local repository files
+- local `terraform.tfvars`
+- local key material such as `tgw-lab-key.pem`
+- IAM users, groups, roles, and access keys
+
+Run the full teardown from the repository root:
+
+```powershell
+cd terraform-aws
+.\scripts\teardown.ps1 -Environment dev -Force
 ```
 
-Do not destroy the backend bucket or lock table unless you also intend to retire the environment state.
+If you want to destroy the lab resources but keep the backend state storage:
+
+```powershell
+cd terraform-aws
+.\scripts\teardown.ps1 -Environment dev -KeepBackend -Force
+```
+
+What the script does:
+
+1. initializes Terraform against the configured backend
+2. runs `terraform destroy -auto-approve`
+3. checks for residual tagged lab resources in AWS
+4. deletes the backend S3 bucket and DynamoDB table unless `-KeepBackend` is set
+
+Recommended operator sequence:
+
+1. Make sure no one is actively using `A1` or `A2`.
+2. If you want an audit trail, save `terraform output -json` and any screenshots before teardown.
+3. Run the teardown script with `-Force`.
+4. If you kept the backend, verify you still want to retain state before the next deployment.
+
+## Billing and cost access note
+
+This lab can be torn down entirely from Terraform and AWS CLI, but AWS cost tooling has one extra account-level caveat: Cost Explorer may still need to be enabled in the Billing and Cost Management console before API calls succeed for an IAM user.
+
+If `aws ce get-cost-and-usage` returns `AccessDeniedException` with `User not enabled for cost explorer access`, the IAM policy is not the only dependency. The account-level Cost Explorer feature still needs to be enabled in the Billing console.
+
+Some cost-management features also have account-scope prerequisites. For example, Billing Conductor actions only work from a payer account, so attaching IAM permissions alone does not make those APIs usable from a non-payer account.
