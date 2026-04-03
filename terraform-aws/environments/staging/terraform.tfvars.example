@@ -1,0 +1,8 @@
+aws_region  = "us-east-1"
+name_prefix = "lab-staging"
+
+common_tags = {
+  Environment = "staging"
+  Project     = "terraform-aws"
+  Owner       = "replace-me"
+}
