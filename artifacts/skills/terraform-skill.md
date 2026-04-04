@@ -234,3 +234,61 @@ terraform output rdp_password_decrypt_command  # CLI to decrypt Windows password
   - `10.2.3.10`
   - `10.2.4.10`
 - Keep the VPC-A to VPC-D isolation intact. A plan that creates reachability from VPC-A to `10.3.0.0/16` should be treated as a segmentation regression.
+
+## 2026-04-04 - NACL and Route Table Lessons from Live Troubleshooting
+
+### Route Table Completeness Rule
+Every subnet route table must have return routes for ALL VPCs it needs to
+communicate with. The untrust subnet in VPC-B was missing return routes to
+VPC-A and VPC-C, so traffic arrived but responses had no path back. Always verify:
+- `lab-rt-b-untrust` must have `10.0.0.0/16 -> TGW1`
+- `lab-rt-b-untrust` must have `10.2.0.0/16 -> TGW1`
+- `lab-rt-b-untrust` must have `10.3.0.0/16 -> TGW2`
+- All VPC-C subnet route tables must have `0.0.0.0/0 -> TGW1` for internet egress
+
+### NACL Completeness Rule
+NACLs must allow traffic in BOTH directions for EVERY hop in the path. The full
+path `A2 -> C1` crosses three NACLs:
+1. `nacl-a` for the VPC-A subnet where `A2` lives
+2. `nacl-c-dmz` for the TGW attachment subnet in VPC-C
+3. `nacl-c-portal` for `C1`
+
+Every hop needs inbound AND outbound rules including ephemeral return ports
+`1024-65535`. Missing any single hop blocks the entire flow even if all others are correct.
+
+### VPC-A NACL Must Allow Inbound for Each Service Port
+Because `A2` and the TGW attachment share the same subnet, `nacl-a` must have
+inbound allows for every service port being accessed, not just SSH. Missing rules
+found and fixed:
+- TCP `80` inbound from `10.0.0.0/16`
+- TCP `443` inbound from `10.0.0.0/16`
+- TCP `8443` inbound from `10.0.0.0/16`
+- TCP `80` egress to `10.2.0.0/16`
+
+### Destroy Count Safety Threshold
+The handoff safety threshold of `10-15` destroys was too conservative for a full
+per-VPC to per-subnet NACL refactor. Expected breakdown for this refactor:
+- `101` x `aws_network_acl_rule`
+- `11` x `aws_route`
+- `6` x `aws_ec2_transit_gateway_route`
+- `3` x `aws_security_group`
+- `2` x `aws_subnet`
+- `2` x `aws_instance`
+- `2` x `aws_network_acl`
+- `2` x `aws_route_table`
+
+Total: `131`. This is expected and safe for this refactor.
+
+Hard constraint remains: NEVER destroy:
+- `aws_vpc`
+- `aws_ec2_transit_gateway`
+- `aws_ec2_transit_gateway_vpc_attachment`
+
+### nginx on AL2023 Instances
+`user_data` must:
+1. Kill `python3 http.server` on ports `80` and `443` before starting nginx
+2. Install nginx, which requires internet access and therefore `0.0.0.0/0` routes
+   on all VPC-C route tables pointing to `TGW1`
+3. Generate the self-signed cert at `/etc/nginx/ssl/`
+4. Write `/etc/nginx/conf.d/ssl.conf` for port `443`
+5. Start and enable nginx

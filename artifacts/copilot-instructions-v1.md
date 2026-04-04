@@ -268,3 +268,44 @@ Read these before working with the respective tools:
 
 - **Terraform**: `artifacts/skills/terraform/SKILL.md`
 - **AWS CLI**: `artifacts/skills/aws-cli/SKILL.md`
+
+## Session 2026-04-04 - Operational Lessons
+
+### Skill File Paths
+Local skill files use flat filenames, not subdirectory `SKILL.md` paths:
+- CORRECT: `artifacts/skills/terraform-skill.md`
+- CORRECT: `artifacts/skills/aws-cli-skill.md`
+- CORRECT: `artifacts/skills/network-troubleshooting/SKILL.md`
+- WRONG: `artifacts/skills/terraform/SKILL.md`
+
+### PowerShell Stop-Parsing
+Always use `terraform --%` for Terraform commands in PowerShell:
+
+```powershell
+terraform --% init -backend-config=backend.hcl
+terraform --% plan -out=tfplan -no-color
+terraform --% apply tfplan
+```
+
+### Destroy Count Threshold
+The safe destroy threshold for the full refactor is `135`.
+The hard constraint is:
+- no `aws_vpc`
+- no `aws_ec2_transit_gateway`
+- no `aws_ec2_transit_gateway_vpc_attachment`
+in the destroy list.
+
+Raw destroy count alone is not a safe/unsafe signal for this architecture change.
+
+### npx skills add requires --yes flag
+Interactive prompts break non-interactive Copilot sessions.
+Always use:
+
+```bash
+npx skills add --yes <skill-path>
+```
+
+### MCP servers not available in Codex environment
+The HashiCorp Terraform MCP and AWS Labs Terraform MCP servers may be configured
+in VS Code settings, but they are not available in the Codex agent environment.
+Proceed without them and use web search for provider documentation instead.

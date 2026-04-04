@@ -301,3 +301,56 @@ Remind user to run `terraform destroy` when lab is complete.
   - `C3` controller: `10.2.4.10`
 - `D1` at `10.3.1.10` must remain unreachable from VPC-A.
 - The A2 diagnostic role does not include `ec2:SearchTransitGatewayRoutes`. If that command fails on A2, treat it as an IAM limitation, not automatic proof of a broken TGW route.
+
+## 2026-04-04 - PowerShell AWS CLI Lessons
+
+### Output Format
+Always use `--output json` and redirect to a file when output is complex
+such as NACLs, route tables, or security groups. The table format produces
+garbled ANSI output in PowerShell terminals.
+
+GOOD:
+```powershell
+aws ec2 describe-network-acls ... --output json > nacl.json
+```
+
+BAD:
+```powershell
+aws ec2 describe-network-acls ... --output table
+```
+
+### Boolean Filters in PowerShell
+JMESPath boolean filters with backticks fail in PowerShell.
+
+BROKEN:
+```powershell
+--query "Items[?IsEgress==`false`]"
+```
+
+FIXED:
+- use `--output json` and read the file
+- or filter manually after capture
+
+### IAM Instance Profile for A2
+A2 requires an IAM instance profile for AWS CLI access.
+
+- Role: `lab-a2-diagnostic-role`
+- Profile: `lab-a2-diagnostic-profile`
+- Policies:
+  - `AmazonEC2ReadOnlyAccess`
+  - `ElasticLoadBalancingReadOnly`
+  - `AmazonS3ReadOnlyAccess`
+
+Attach via:
+```powershell
+aws ec2 associate-iam-instance-profile
+```
+
+### trust.json for IAM Role Creation
+PowerShell mangles inline JSON for `assume-role-policy-document`.
+Always write to a file first:
+
+```powershell
+'{"Version":"2012-10-17",...}' | Out-File -Encoding ascii trust.json
+aws iam create-role --assume-role-policy-document file://trust.json
+```
