@@ -54,7 +54,7 @@ output "nat_gateway_eip" {
 }
 
 output "alb_dns_name" {
-  description = "DNS name of the internet-facing ALB (customer entry)."
+  description = "DNS name of the internet-facing customer-entry load balancer."
   value       = aws_lb.alb.dns_name
 }
 

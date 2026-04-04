@@ -184,10 +184,38 @@ function Show-ResidualLabResources {
 
   Write-Host "Checking for residual tagged resources in $Region..."
 
-  & aws ec2 describe-instances --region $Region --filters @($tagFilters + "Name=instance-state-name,Values=pending,running,stopping,stopped") --query "Reservations[].Instances[].InstanceId" --output json
-  & aws ec2 describe-volumes --region $Region --filters $tagFilters --query "Volumes[].VolumeId" --output json
-  & aws ec2 describe-vpcs --region $Region --filters $tagFilters --query "Vpcs[].VpcId" --output json
-  & aws ec2 describe-transit-gateways --region $Region --filters $tagFilters --query "TransitGateways[].TransitGatewayId" --output json
+  Write-Host "`nInstances:"
+  & aws ec2 describe-instances --region $Region --filters @($tagFilters + "Name=instance-state-name,Values=pending,running,stopping,stopped") --query "Reservations[].Instances[].{Name:Tags[?Key=='Name']|[0].Value,Id:InstanceId,State:State.Name}" --output table
+
+  Write-Host "`nVolumes:"
+  & aws ec2 describe-volumes --region $Region --filters $tagFilters --query "Volumes[].{Id:VolumeId,State:State,SizeGiB:Size}" --output table
+
+  Write-Host "`nElastic IPs:"
+  & aws ec2 describe-addresses --region $Region --filters $tagFilters --query "Addresses[].{AllocationId:AllocationId,PublicIp:PublicIp,AssociationId:AssociationId}" --output table
+
+  Write-Host "`nNAT gateways:"
+  & aws ec2 describe-nat-gateways --region $Region --filter $tagFilters --query "NatGateways[?State!='deleted'].{Id:NatGatewayId,State:State,SubnetId:SubnetId}" --output table
+
+  Write-Host "`nLoad balancers:"
+  & aws elbv2 describe-load-balancers --region $Region --query "LoadBalancers[?starts_with(LoadBalancerName, 'lab-')].{Name:LoadBalancerName,Type:Type,Scheme:Scheme,State:State.Code}" --output table
+
+  Write-Host "`nTarget groups:"
+  & aws elbv2 describe-target-groups --region $Region --query "TargetGroups[?starts_with(TargetGroupName, 'lab-')].{Name:TargetGroupName,Protocol:Protocol,Port:Port}" --output table
+
+  Write-Host "`nNetwork interfaces:"
+  & aws ec2 describe-network-interfaces --region $Region --filters $tagFilters --query "NetworkInterfaces[].{Id:NetworkInterfaceId,Status:Status,PrivateIp:PrivateIpAddress}" --output table
+
+  Write-Host "`nTransit gateway attachments:"
+  & aws ec2 describe-transit-gateway-vpc-attachments --region $Region --filters $tagFilters --query "TransitGatewayVpcAttachments[].{Id:TransitGatewayAttachmentId,State:State,VpcId:VpcId}" --output table
+
+  Write-Host "`nTransit gateways:"
+  & aws ec2 describe-transit-gateways --region $Region --filters $tagFilters --query "TransitGateways[].{Id:TransitGatewayId,State:State}" --output table
+
+  Write-Host "`nVPCs:"
+  & aws ec2 describe-vpcs --region $Region --filters $tagFilters --query "Vpcs[].{Id:VpcId,Cidr:CidrBlock,State:State}" --output table
+
+  Write-Host "`nCloudWatch log groups:"
+  & aws logs describe-log-groups --region $Region --log-group-name-prefix "/aws/vpc/flow-logs/" --query "logGroups[?starts_with(logGroupName, '/aws/vpc/flow-logs/')].{Name:logGroupName,StoredBytes:storedBytes}" --output table
 }
 
 Require-Command -Name "terraform"
@@ -235,9 +263,19 @@ Write-Host "Initializing Terraform in $environmentDirectory..."
 Invoke-Terraform -WorkingDirectory $environmentDirectory -Arguments @("init", "-backend-config=backend.hcl", "-reconfigure")
 
 Write-Host "Destroying Terraform-managed lab resources..."
-Invoke-Terraform -WorkingDirectory $environmentDirectory -Arguments @("destroy", "-auto-approve")
+$destroySucceeded = $false
 
-Show-ResidualLabResources -Region $region
+try {
+  Invoke-Terraform -WorkingDirectory $environmentDirectory -Arguments @("destroy", "-auto-approve")
+  $destroySucceeded = $true
+}
+finally {
+  Show-ResidualLabResources -Region $region
+}
+
+if (-not $destroySucceeded) {
+  throw "Terraform destroy failed. Review the residual resource summary above before retrying teardown."
+}
 
 if (-not $KeepBackend) {
   Write-Host "Deleting backend bucket $bucketName..."

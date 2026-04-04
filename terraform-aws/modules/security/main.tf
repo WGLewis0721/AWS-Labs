@@ -546,8 +546,8 @@ resource "aws_security_group" "c3_controller" {
 # ── VPC-D ─────────────────────────────────────────────────────────────────────
 
 resource "aws_security_group" "d" {
-  description = "Customer test client in subnet-d-private (VPC-D)."
-  name        = "lab-sg-customer-d1"
+  description = "Customer test client security group."
+  name        = "lab-sg-vpc-d"
   vpc_id      = var.vpc_ids["d"]
 
   ingress {
@@ -606,5 +606,5 @@ resource "aws_security_group" "d" {
     cidr_blocks = ["10.2.0.0/16"]
   }
 
-  tags = merge(var.tags, { Name = "lab-sg-customer-d1" })
+  tags = merge(var.tags, { Name = "lab-sg-vpc-d" })
 }

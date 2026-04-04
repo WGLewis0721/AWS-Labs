@@ -394,6 +394,7 @@ resource "aws_eip" "palo_untrust" {
   domain                    = "vpc"
   network_interface         = aws_network_interface.palo_untrust.id
   associate_with_private_ip = "10.1.1.10"
+  depends_on                = [aws_instance.b1]
 
   tags = merge(var.tags, { Name = "lab-eip-palo-untrust" })
 }

@@ -215,3 +215,8 @@ terraform output a2_linux_public_ip   # Linux SSH target
 terraform output test_commands        # full test matrix with real IPs
 terraform output rdp_password_decrypt_command  # CLI to decrypt Windows password
 ```
+
+## 2026-04-03 - Architecture refactor destroy count expectations
+
+- A full per-VPC to per-subnet NACL refactor can legitimately destroy about 100 `aws_network_acl_rule` resources in one plan. Treat that as expected churn when old per-VPC ACLs are being replaced by per-subnet ACLs.
+- Set the operator safety threshold from resource-type analysis, not a raw destroy count. Large NACL-rule churn can be safe, but any destroy or replace involving `aws_vpc`, `aws_ec2_transit_gateway`, or `aws_ec2_transit_gateway_vpc_attachment` still requires an immediate stop and explicit review.

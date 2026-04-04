@@ -27,3 +27,14 @@ module "compute" {
   tags               = local.common_tags
 }
 
+# Preserve the original lab subnets that were split into per-role names
+# during the architecture refactor.
+moved {
+  from = module.network.aws_subnet.this["b"]
+  to   = module.network.aws_subnet.this["b_untrust"]
+}
+
+moved {
+  from = module.network.aws_subnet.this["c"]
+  to   = module.network.aws_subnet.this["c_dmz"]
+}

@@ -285,3 +285,8 @@ Remind user to run `terraform destroy` when lab is complete.
 | Active TGW routes | `Name=state,Values=active` |
 | Specific VPC's route tables | `Name=vpc-id,Values=<VPC_ID>` |
 | Subnet's NACL | `Name=association.subnet-id,Values=<SUBNET_ID>` |
+
+## 2026-04-03 - Architecture refactor destroy count expectations
+
+- A full per-VPC to per-subnet NACL refactor can legitimately destroy about 100 `aws_network_acl_rule` resources. Do not treat that raw count by itself as a failure condition.
+- When reviewing a large refactor, base the stop/go call on resource types. High `aws_network_acl_rule` churn can be expected, but destroys or replacements touching `aws_vpc`, `aws_ec2_transit_gateway`, or `aws_ec2_transit_gateway_vpc_attachment` still require an immediate operator stop and review.

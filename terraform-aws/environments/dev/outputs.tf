@@ -54,7 +54,7 @@ output "nat_gateway_eip" {
 }
 
 output "alb_dns_name" {
-  description = "DNS name of the internet-facing ALB."
+  description = "DNS name of the internet-facing customer-entry load balancer."
   value       = module.network.alb_dns_name
 }
 
@@ -124,8 +124,7 @@ output "test_commands" {
   curl -sk --connect-timeout 5 https://10.2.4.10:8443              # Controller — MUST FAIL
   curl -s  --connect-timeout 5 http://10.0.1.10                    # VPC-A — MUST FAIL
 
-  ALB (internet-facing):
-  curl -sk -o /dev/null -w "%%{http_code}" https://${module.network.alb_dns_name}
+Customer entry load balancer (internet-facing):
+curl -sk -o /dev/null -w "%%{http_code}" https://${module.network.alb_dns_name}
   EOT
 }
-
