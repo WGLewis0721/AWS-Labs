@@ -1,2 +1,14 @@
 *.pem
 *.pem.pub
+
+# Local agent tooling
+.agents/
+.claude/
+skills-lock.json
+
+# Local handoff / scratch artifacts
+artifacts/Seasoning.md
+artifacts/tmp/
+artifacts/results/apply-output-*.txt
+artifacts/results/*_destroy-diagnosis.md
+artifacts/results/*_operator-handoff-plan-review.md
