@@ -1,56 +1,80 @@
-Before taking any action, complete these steps in order:
+Before taking action, use this baseline setup. It is intentionally generic so it can be paired with task-specific prompts.
 
-## STEP 1 — Install established skills
+## STEP 1 - Install baseline external skills only if needed
 
-npx skills add hashicorp/agent-skills/terraform/code-generation/skills/terraform-style-guide
-npx skills add hashicorp/agent-skills/terraform/module-generation/skills/refactor-module
-npx skills add terramate-io/agent-skills --skill terraform-best-practices
-npx skills add awslabs/agent-plugins
+Use `--yes` so sessions stay non-interactive:
 
-## STEP 2 — Read local project skills
+```bash
+npx skills add --yes hashicorp/agent-skills/terraform/code-generation/skills/terraform-style-guide
+npx skills add --yes hashicorp/agent-skills/terraform/module-generation/skills/refactor-module
+npx skills add --yes terramate-io/agent-skills --skill terraform-best-practices
+npx skills add --yes awslabs/agent-plugins
+```
 
-C:\Users\Willi\projects\Labs\artifacts\skills\terraform\SKILL.md
-C:\Users\Willi\projects\Labs\artifacts\skills\aws-cli\SKILL.md
+Do not reinstall these blindly if the task does not depend on them.
 
-When conflicts exist between installed skills and local skills,
-local skills take precedence — they encode project-specific
-decisions that override general best practices.
+## STEP 2 - Read the local project skills that match the task
 
-## STEP 3 — Use MCP servers if configured in VS Code
+Current local skill paths:
 
-- terraform (HashiCorp MCP) — query live Terraform Registry instead of web searching
-- awslabs.terraform-mcp-server — AWS best practices and Checkov security scanning
+- `C:\Users\Willi\projects\Labs\artifacts\skills\terraform-skill.md`
+- `C:\Users\Willi\projects\Labs\artifacts\skills\aws-cli-skill.md`
+- `C:\Users\Willi\projects\Labs\artifacts\skills\network-troubleshooting\SKILL.md`
 
-## STEP 4 — Read and follow instructions
+Local skills take precedence over external skills because they capture the lab-specific architecture and known-good workflows.
 
-C:\Users\Willi\projects\Labs\artifacts\copilot-instructions-v1.md
-C:\Users\Willi\projects\Labs\artifacts\OPERATOR-HANDOFF-APPLY.md
+## STEP 3 - Read the current session instructions
+
+Always read:
+
+- `C:\Users\Willi\projects\Labs\artifacts\prompts\copilot-instructions-v1.md`
+
+Then read the task-specific prompt if one exists.
+
+## STEP 4 - Default execution strategy
+
+Use the smallest workflow that solves the task:
+
+- docs task -> edit docs only
+- diagnosis task -> use read-only CLI checks and the netcheck scripts
+- deployment task -> prefer `artifacts\scripts\deploy.ps1`
+- teardown task -> prefer `artifacts\scripts\teardown.ps1`
+- routine validation task -> prefer the SSM netcheck documents before long manual sessions
+
+## CURRENT ARCHITECTURE DEFAULTS
+
+Assume these are true unless the task explicitly says they changed:
+
+- no internal `NLB-B` or `NLB-C`
+- direct private-IP validation from `A1` and `A2`
+- one public customer-entry load balancer only
+- Route 53 is not used for custom lab resources
+- current direct validation targets are:
+  - `10.1.3.10`
+  - `10.2.2.10`
+  - `10.2.3.10`
+  - `10.2.4.10`
+- `10.3.1.10` must fail from VPC-A
 
 ## EXECUTION RULES
 
-- Run terraform init and terraform plan only
-- Print the full plan destroy count before doing anything else
-- STOP and report if destroy count exceeds 10 resources
-- STOP and report if any TGW, VPC, or TGW attachment shows as destroy
-- Do NOT run terraform apply without my explicit instruction
-- Do NOT run any aws cli commands — I will run those myself
+- verify whether a task or manual fix is already complete before redoing it
+- prefer existing repo scripts over handwritten one-off command sequences
+- use `terraform --%` in PowerShell
+- prefer `aws ... --output json` for anything complex in PowerShell
+- use SSM docs and script payloads already staged in the repo and S3
+- keep context usage tight: read only the files needed for the active task
 
-## AFTER I SAY APPLY
+## KNOWN CANONICAL SCRIPTS
 
-- Run terraform apply tfplan
-- Capture all output to artifacts/results/apply-output-YYYY-MM-DD.txt
-- Do NOT run validation commands — I will run those from the handoff
+- deploy: `C:\Users\Willi\projects\Labs\artifacts\scripts\deploy.ps1`
+- teardown: `C:\Users\Willi\projects\Labs\artifacts\scripts\teardown.ps1`
+- A2 netcheck: `C:\Users\Willi\projects\Labs\artifacts\scripts\netcheck.sh`
+- A1 netcheck: `C:\Users\Willi\projects\Labs\artifacts\scripts\netcheck-a1.ps1`
+- SSM docs:
+  - `lab-netcheck-a1`
+  - `lab-netcheck-a2`
 
-## AFTER I CONFIRM APPLY SUCCEEDED
+## MCP NOTE
 
-Update local skill files with what was learned this session.
-Append only — do not rewrite existing content.
-Format: ## YYYY-MM-DD — [what changed and why]
-
-Files to update:
-  C:\Users\Willi\projects\Labs\artifacts\skills\terraform\SKILL.md
-  C:\Users\Willi\projects\Labs\artifacts\skills\aws-cli\SKILL.md
-
-Future task (do not start now): Convert local skills to Agent Skills
-format by moving them to .skills/ at the repo root so they auto-load
-in future Copilot sessions without explicit reference.
+If MCP servers are unavailable in the Codex environment, do not block on them. Proceed with the local skills, repo scripts, AWS CLI, and web verification when needed.

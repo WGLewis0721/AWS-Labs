@@ -3,82 +3,100 @@
 Canonical workflow content lives in:
 `network-troubleshooting.md`
 
-Use that file for the full direct-access troubleshooting workflow.
+Use that file for the full workflow.
+
+## Current Defaults
+
+Assume all of the following unless the operator explicitly says the design changed:
+
+- no internal `NLB-B` or `NLB-C`
+- direct private-IP validation from `A1` and `A2`
+- one public customer-entry load balancer only
+- no custom Route 53 resources
+- `D1` must remain unreachable from VPC-A
+
+## First Response Order
+
+1. Run the canonical A2 netcheck or its SSM document first.
+2. If A2 succeeds and A1 fails, treat it as an A1 browser or certificate problem first.
+3. If direct private-IP validation fails, inspect route tables, NACLs, and SGs in that order.
+4. Use Reachability Analyzer only after the basic path checks.
 
 ## Known Issues
 
-## 2026-04-04 - New Issues Found and Fixed
+### 2026-04-04 - lab-rt-b-untrust missing return routes
 
-### Issue: lab-rt-b-untrust missing return routes
-Symptom: Ping works to Palo UNTRUST (`10.1.1.10`) but TCP fails.
-Root cause: `lab-rt-b-untrust` only had local and `0.0.0.0/0 -> IGW`.
-No routes for `10.0.0.0/16`, `10.2.0.0/16`, or `10.3.0.0/16`.
-Fix: Add three routes:
-- `10.0.0.0/16 -> TGW1 (tgw-0182ba880fd0f5577)`
+Symptom: ping to Palo UNTRUST worked but TCP failed.
+
+Root cause:
+- `lab-rt-b-untrust` was missing return routes for VPC-A, VPC-C, and VPC-D.
+
+Required routes:
+- `10.0.0.0/16 -> TGW1`
 - `10.2.0.0/16 -> TGW1`
-- `10.3.0.0/16 -> TGW2 (tgw-07ee4fdc98c23dcaa)`
+- `10.3.0.0/16 -> TGW2`
 
-### Issue: VPC-C instances have no internet egress
-Symptom: `sudo dnf install nginx` fails on `C1`, `C2`, and `C3`.
-Root cause: VPC-C subnet route tables were missing `0.0.0.0/0 -> TGW1`.
-Fix: Add the default route to all VPC-C route tables via `TGW1`.
-Workaround: Download RPMs on `A2`, then SCP them to `C1`, `C2`, and `C3`
-and install with `rpm -ivh *.rpm`.
+### 2026-04-04 - VPC-C instances missing centralized egress
 
-### Issue: python3 http.server blocking nginx on ports 80 and 443
-Symptom: nginx fails to start with address already in use.
-Root cause: `user_data` launched `python3 http.server` on ports `80` and `443`
-as a placeholder, so nginx could not bind those ports.
+Symptom: package installation failed on `C1`, `C2`, and `C3`.
+
+Root cause:
+- VPC-C route tables did not all have `0.0.0.0/0 -> TGW1`.
+
+### 2026-04-04 - placeholder web server blocked nginx
+
+Symptom: nginx failed to bind `80` or `443`.
+
+Root cause:
+- placeholder Python listeners were already bound to those ports.
+
+### 2026-04-04 - nacl-a missing service-port return rules
+
+Symptom: `A2 -> C1` HTTPS timed out even after the VPC-C NACLs looked correct.
+
+Root cause:
+- `A2` and the TGW attachment share subnet `a`, so `nacl-a` also needed the service-port return path.
+
+Required rules:
+- ingress `111` tcp `80`
+- ingress `112` tcp `443`
+- ingress `113` tcp `8443`
+- egress `125` tcp `80`
+
+### 2026-04-04 - nacl-c-dmz missing HTTP egress to C1
+
+Symptom: `A2 -> C1` HTTP failed while other portions of the path looked healthy.
+
+Root cause:
+- `nacl-c-dmz` was missing egress rule `96` for `tcp/80 -> 10.2.2.0/24`.
+
+### 2026-04-04 - A2 key permissions too open
+
+Symptom:
+- SSH warned about an unprotected private key file.
+
 Fix:
-- `sudo fuser -k 80/tcp && sudo fuser -k 443/tcp`
-- `sudo systemctl start nginx`
 
-### Issue: nginx not configured for HTTPS out of box
-Symptom: port `443` unreachable even after nginx starts.
-Root cause: default nginx config only binds port `80`.
-Fix:
-- create `/etc/nginx/ssl`
-- generate a self-signed cert
-- write `/etc/nginx/conf.d/ssl.conf` with a `listen 443 ssl` block
-- restart nginx
-
-### Issue: nacl-a missing inbound rules for service ports
-Symptom: HTTPS to `C1` times out from `A2` despite all other NACLs being correct.
-Root cause: `A2` and the TGW attachment ENI share `subnet-a-public`, so the
-subnet NACL must allow inbound for every service port being accessed.
-Fix: Add inbound rules to `nacl-a`:
-- TCP `80` from `10.0.0.0/16` as rule `111`
-- TCP `443` from `10.0.0.0/16` as rule `112`
-- TCP `8443` from `10.0.0.0/16` as rule `113`
-
-Also add egress:
-- TCP `80` to `10.2.0.0/16` as rule `125`
-
-### Issue: SSH key permissions too open on A2
-Symptom: SSH from `A2` to other instances fails with
-`WARNING: UNPROTECTED PRIVATE KEY FILE`.
-Fix:
 ```bash
 chmod 600 ~/tgw-lab-key.pem
 ```
 
-### Issue: IMDSv2 blocks IP detection in scripts
-Symptom: `curl http://169.254.169.254/latest/meta-data/local-ipv4` returns empty.
-Root cause: AL2023 instances use IMDSv2.
-Fix: use a token-based metadata request or derive the IP from the local route table.
+### 2026-04-04 - IMDSv2 broke naive local-IP checks
 
-### Issue: netcheck.sh stops on first failure
-Symptom: script exits after the first `FAIL`.
-Root cause: `set -euo pipefail` exits on non-zero return.
-Fix:
-```bash
-sed -i 's/set -euo pipefail/set -uo pipefail/' netcheck.sh
-```
+Symptom:
+- old metadata `curl` commands returned nothing.
 
-### Issue: CRLF line endings in scripts transferred from Windows
-Symptom: `bash netcheck.sh` returns `command not found $'\\r'`.
-Root cause: SCP from Windows transferred CRLF line endings.
 Fix:
-```bash
-sed -i 's/\r//' netcheck.sh
-```
+- use IMDSv2 token flow
+- or derive the IP from `ip route`
+
+### 2026-04-04 - old reports were polluted by removed load balancers
+
+Symptom:
+- scripts kept flagging NLB failures that no longer mattered.
+
+Root cause:
+- troubleshooting logic still assumed the pre-refactor internal NLB model.
+
+Fix:
+- switch the default validation path to direct private IPs and keep the public customer-entry load balancer separate from operator-path checks

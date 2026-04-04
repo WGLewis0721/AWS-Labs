@@ -1,354 +1,351 @@
 # terraform-aws
 
-This repository contains a Terraform-based AWS Transit Gateway segmentation lab. It is organized as reusable modules plus per-environment roots, but the `dev` environment is the fully built lab described below.
+This repository contains the working Terraform configuration for the TGW segmentation lab. The current steady-state design is the post-refactor architecture validated on April 4, 2026.
 
-## What this lab is
+## Current Architecture
 
-The lab models a segmented environment with a controlled management entry point, shared inspection tiers, and a customer segment that is intentionally isolated from direct management access.
+The lab models a segmented environment with a public management edge, direct private-IP validation from VPC-A into the shared service tiers, and a customer segment that stays isolated from VPC-A.
 
-It builds:
+Core components:
 
-- 4 VPCs with 1 subnet each
-- 2 Transit Gateways with separate route tables
-- 7 EC2 instances that represent the lab roles
-- custom VPC route tables
-- custom network ACLs
-- custom security groups
-- a remote Terraform backend for the `dev` environment
+- 4 VPCs
+  - VPC-A `10.0.0.0/16` - management / cloud host
+  - VPC-B `10.1.0.0/16` - Palo Alto simulation
+  - VPC-C `10.2.0.0/16` - AppGate simulation
+  - VPC-D `10.3.0.0/16` - customer segment
+- 9 subnets
+  - `a`
+  - `b_untrust`, `b_trust`, `b_mgmt`
+  - `c_dmz`, `c_portal`, `c_gateway`, `c_controller`
+  - `d`
+- 2 Transit Gateways
+  - `TGW1` - management transit domain
+  - `TGW2` - customer transit domain
+- 7 EC2 instances
+  - `A1`, `A2`, `B1`, `C1`, `C2`, `C3`, `D1`
+- 1 public customer-entry load balancer in VPC-B untrust
+- per-subnet route tables and per-subnet NACLs
+- centralized internet egress through the NAT Gateway in VPC-A
 
 ## Topology
 
 ```text
-                         Internet
-                            |
-                    +-----------------+
-                    | VPC-A CloudHost |
-                    | 10.0.0.0/16     |
-                    |                 |
-                    | A1 Windows      | <- public RDP entry point
-                    | A2 Linux        | <- public SSH/admin jump host
-                    +--------+--------+
-                             |
-                           TGW1
-                 +-----------+-----------+
-                 |                       |
-        +--------+--------+     +--------+--------+
-        | VPC-B Palo Alto |     | VPC-C AppGate   |
-        | 10.1.0.0/16     |     | 10.2.0.0/16     |
-        | B1              |     | C1              |
-        +--------+--------+     +--------+--------+
-                 \                       /
-                  \                     /
-                           TGW2
-                            |
-                    +-------+--------+
-                    | VPC-D Customer |
-                    | 10.3.0.0/16    |
-                    | D1             |
-                    +----------------+
+Internet
+  |
+  +-- A1 Windows (RDP) in VPC-A
+  +-- A2 Linux (SSH) in VPC-A
+  |
+  +-- Customer-entry load balancer in VPC-B untrust
+        |
+        +-- B1 untrust ENI 10.1.1.10
+
+TGW1
+  |
+  +-- VPC-A 10.0.0.0/16
+  +-- VPC-B 10.1.0.0/16
+  |     B1 mgmt:   10.1.3.10
+  |     B1 trust:  10.1.2.10
+  |     B1 untrust 10.1.1.10
+  +-- VPC-C 10.2.0.0/16
+        C1 portal:     10.2.2.10
+        C2 gateway:    10.2.3.10
+        C3 controller: 10.2.4.10
+
+TGW2
+  |
+  +-- VPC-B 10.1.0.0/16
+  +-- VPC-C 10.2.0.0/16
+  +-- VPC-D 10.3.0.0/16
+        D1 customer: 10.3.1.10
 ```
 
-## How it is supposed to work
+## Working Access Model
 
-This lab is designed around bastion-style access, not direct exposure of every workload to the internet.
+This is the current operator model. Future docs and prompts should assume this unless the architecture is intentionally changed again.
 
-- Your laptop connects to `A1` over RDP for manual browser checks.
-- Your laptop connects to `A2` over SSH for terminal-based administration and validation.
-- `A1` and `A2` can reach `B1` and `C1`.
-- Internal validation in `VPC-B` and `VPC-C` uses the private instance IPs directly. The lab does not depend on internal NLBs.
-- `B1` and `C1` sit on both transit domains and represent shared service or inspection tiers.
-- The validated administrative path to `D1` is through `B1`.
-- `VPC-A` does not have a direct allowed path to `VPC-D`.
+- Laptop -> `A1` over RDP for browser checks
+- Laptop -> `A2` over SSH for CLI and admin checks
+- `A1` and `A2` validate VPC-B and VPC-C directly by private IP
+- `A1` and `A2` do not have a direct route to VPC-D
+- `B1`, `C1`, `C2`, and `C3` use centralized egress through `TGW1 -> VPC-A NAT`
+- `B1` and VPC-C nodes participate in both transit domains
+- `D1` is intentionally isolated from VPC-A
 
-In other words, the environment is meant to behave like a real segmented network:
+Important current-state facts:
 
-- public ingress exists only at the management edge in `VPC-A`
-- east-west movement is controlled by route tables, security groups, and NACLs
-- the customer segment in `VPC-D` is reachable only through the intended internal path
+- There are no internal `NLB-B` or `NLB-C` load balancers anymore.
+- Route 53 is not used for this lab beyond the AWS-managed default VPC resolver. There are no custom hosted zones or custom Resolver endpoints.
+- The output name `alb_dns_name` is kept for compatibility, but the current customer-entry load balancer is implemented as a TLS Network Load Balancer in AWS.
 
-## Lab components
+## Instance Inventory
 
-| Node | VPC | Private IP | Public IP | Purpose |
+| Node | Role | Private IP(s) | Public exposure | Notes |
 | --- | --- | --- | --- | --- |
-| A1 | VPC-A | `10.0.1.10` | yes, assigned at apply time | Windows bastion for RDP and Chrome-based checks |
-| A2 | VPC-A | `10.0.1.20` | yes, assigned at apply time | Linux bastion for SSH and CLI validation |
-| B1 | VPC-B | `10.1.3.10` management, `10.1.2.10` trust, `10.1.1.10` untrust | public EIP on `10.1.1.10` | Palo Alto simulation host with a dedicated management interface |
-| C1 | VPC-C | `10.2.2.10` | no | AppGate portal simulation host with SSH and HTTPS management from VPC-A |
-| C2 | VPC-C | `10.2.3.10` | no | AppGate gateway simulation host with SSH and HTTPS management from VPC-A |
-| C3 | VPC-C | `10.2.4.10` | no | AppGate controller simulation host with SSH and HTTPS management from VPC-A |
-| D1 | VPC-D | `10.3.1.10` | no | customer test client used to prove segmentation |
+| A1 | Windows browser bastion | `10.0.1.10` | public IP | RDP entry point for Chrome-based checks |
+| A2 | Linux jump box | `10.0.1.20` | public IP | SSH entry point, bootstrap host, diagnostic host |
+| B1 | Palo Alto simulation | `10.1.1.10`, `10.1.2.10`, `10.1.3.10` | EIP on untrust | Operator validation target is the mgmt interface `10.1.3.10` |
+| C1 | AppGate portal simulation | `10.2.2.10` | private only | Supports direct HTTP and HTTPS validation from VPC-A |
+| C2 | AppGate gateway simulation | `10.2.3.10` | private only | Supports direct HTTPS validation from VPC-A |
+| C3 | AppGate controller simulation | `10.2.4.10` | private only | Current validation page is on `443`, not `8443` |
+| D1 | Customer host | `10.3.1.10` | private only | Must stay unreachable from VPC-A |
 
-The instance roles are intentionally simple:
+## Expected Connectivity
 
-- `A1` installs Google Chrome and is used for manual HTTP validation.
-- `A2` is the operator jump box.
-- `B1`, `C1`, `C2`, and `C3` run lightweight static web services with HTTPS enabled for operator validation.
-- `D1` is a Linux test host with no public IP.
+Healthy state:
 
-## Transit gateways and routing
-
-Two Transit Gateways are used to model segmented connectivity:
-
-- `TGW1` is the management side and connects `VPC-A`, `VPC-B`, and `VPC-C`
-- `TGW2` is the customer side and connects `VPC-B`, `VPC-C`, and `VPC-D`
-
-That means:
-
-- `VPC-A` can route to `VPC-B` and `VPC-C`
-- `VPC-D` can route to `VPC-B` and `VPC-C`
-- `VPC-A` has no route to `VPC-D`
-
-This is the core of the exercise. `B1` and `C1` are the shared middle tiers that attach to both TGWs, while `A` and `D` remain separated from each other.
-
-## Expected connectivity
-
-These are the intended outcomes for the deployed lab:
-
-| Source | Destination | Protocol | Expected result |
+| Source | Destination | Protocol | Expected |
 | --- | --- | --- | --- |
-| A2 | B1 | SSH | allowed |
-| A2 | C1/C2/C3 | SSH | allowed |
-| A2 | D1 | SSH | blocked |
-| A2 | B1 | HTTPS | allowed |
-| A2 | C1/C2/C3 | HTTPS | allowed |
-| A2 | D1 | HTTPS | blocked |
-| A2 | B1/C1/C2/C3 | ICMP | allowed |
-| A2 | D1 | ICMP | blocked |
-| B1 | D1 | SSH | allowed |
-| B1 | D1 | ICMP | allowed |
-| A1 Chrome | B1 | HTTPS | allowed |
-| A1 Chrome | C1/C2/C3 | HTTPS | allowed |
-| A1 Chrome | D1 | HTTPS | blocked |
+| Laptop | A1 | RDP | allowed |
+| Laptop | A2 | SSH | allowed |
+| A1 | `10.1.3.10` | HTTPS | allowed |
+| A1 | `10.2.2.10` | HTTP / HTTPS | allowed |
+| A1 | `10.2.3.10` | HTTPS | allowed |
+| A1 | `10.2.4.10` | HTTPS | allowed |
+| A1 | `10.3.1.10` | any | blocked |
+| A2 | `10.1.3.10` | SSH / HTTPS / ICMP | allowed |
+| A2 | `10.2.2.10` | SSH / HTTP / HTTPS / ICMP | allowed |
+| A2 | `10.2.3.10` | SSH / HTTPS / ICMP | allowed |
+| A2 | `10.2.4.10` | SSH / HTTPS / ICMP | allowed |
+| A2 | `10.3.1.10` | SSH / HTTP / ICMP | blocked |
+| B1 | D1 | SSH / ICMP | allowed |
+| Customer-entry LB | B1 untrust | TLS 443 | allowed |
 
-## Repository structure
+Do not use the old internal NLB DNS names for validation. They were removed from the design.
 
-The repository keeps reusable components separate from environment roots:
+## Preferred Deployment Workflow
 
-- `modules/network`: VPCs, subnets, Internet Gateway, Transit Gateways, route tables, and NACLs
-- `modules/security`: security groups and default SG hardening
-- `modules/compute`: EC2 instances, key pair, AMI selection, and user data
-- `environments/dev`: the working lab environment
-- `environments/staging`: placeholder environment root
-- `environments/prod`: placeholder environment root
-- `examples/simple-stack`: example module composition
+Use the staged deployment script from the repository root:
 
-## Backend
-
-The `dev` environment uses a remote backend with these names:
-
-- S3 bucket: `terraform-lab-wgl`
-- DynamoDB table: `terraform-lab-db-wgl`
-- region: `us-east-1`
-
-The backend config lives in [backend.hcl](C:/Users/Willi/projects/Labs/terraform-aws/environments/dev/backend.hcl) for local use, and the template lives in [backend.hcl.example](C:/Users/Willi/projects/Labs/terraform-aws/environments/dev/backend.hcl.example).
-
-## Prerequisites
-
-Before you deploy or operate the lab, you need:
-
-- Terraform installed locally
-- AWS CLI installed and authenticated
-- access to the target AWS account in `us-east-1`
-- an SSH key pair where the public key is supplied to Terraform as `public_key`
-- the matching private key file available locally as `tgw-lab-key.pem`
-- an RDP client if you want to use `A1`
-
-For real use, narrow `management_cidrs` to your actual admin source range. The example value of `0.0.0.0/0` is for a disposable lab only.
-
-## Deploying the dev lab
-
-Format the repository first:
-
-```bash
-cd terraform-aws
-terraform fmt -recursive
+```powershell
+.\artifacts\scripts\deploy.ps1 -Environment dev
 ```
 
-Create your local variable file:
+This is the canonical deployment path for a fresh or rebuilt environment. It does more than `terraform apply`.
 
-```bash
-cd environments/dev
-Copy-Item terraform.tfvars.example terraform.tfvars
+Deployment phases:
+
+1. Preflight checks
+2. Seed S3 assets, IAM, SSM documents, and golden AMIs
+3. `terraform init`
+4. Network foundation targeted apply
+5. Security layer targeted apply
+6. Compute layer targeted apply
+7. Full convergence apply
+8. Post-deploy bootstrap and verification
+
+What the deploy script does:
+
+- verifies AWS CLI auth, Terraform, SSH tooling, and `terraform.tfvars`
+- uploads deploy and netcheck assets to `s3://terraform-lab-wgl/`
+- creates or updates:
+  - `lab-netcheck-a1`
+  - `lab-netcheck-a2`
+- ensures diagnostic instance profiles exist for `A1` and `A2`
+- creates golden AMIs if they do not already exist
+- writes `generated.instance-amis.auto.tfvars.json` into `terraform-aws/environments/dev/`
+- applies Terraform in phases to reduce blast radius and improve troubleshooting
+- copies the key to `A2`
+- bootstraps nginx and TLS on the Linux web nodes through `A2` using the S3-hosted RPM bundle
+- runs SSM-backed netchecks and stores results in S3
+
+This workflow is the main reason the repo is now more stable and requires less operator back-and-forth.
+
+## Manual Terraform Workflow
+
+Use direct Terraform commands only when you are intentionally working on the modules or reviewing a change set. For full environment builds, prefer `artifacts/scripts/deploy.ps1`.
+
+PowerShell commands:
+
+```powershell
+Set-Location .\terraform-aws\environments\dev
+terraform --% init -backend-config=backend.hcl
+terraform --% plan -out=tfplan -no-color
+terraform --% apply tfplan
 ```
 
-Update at least these values in `terraform.tfvars`:
+When using raw Terraform:
 
-- `public_key`
-- `management_cidrs`
-- `common_tags.Owner`
+- always review the destroy set
+- treat destroys of `aws_vpc`, `aws_ec2_transit_gateway`, or `aws_ec2_transit_gateway_vpc_attachment` as an immediate stop
+- large `aws_network_acl_rule` churn can be expected during NACL refactors and is not a stop condition by itself
 
-Then initialize and deploy:
+## Validation Workflow
+
+### A1 browser checks
+
+RDP to `A1`, open Chrome, and validate:
+
+- `https://10.1.3.10`
+- `http://10.2.2.10`
+- `https://10.2.2.10`
+- `https://10.2.3.10`
+- `https://10.2.4.10`
+
+Expected:
+
+- `B1`, `C1`, `C2`, and `C3` load after certificate warnings
+- `D1` does not load
+
+### A2 CLI checks
+
+SSH to `A2` and validate:
 
 ```bash
-terraform init -backend-config=backend.hcl
-terraform validate
-terraform plan
-terraform apply
+ssh -i tgw-lab-key.pem ec2-user@10.1.3.10
+ssh -i tgw-lab-key.pem ec2-user@10.2.2.10
+ssh -i tgw-lab-key.pem ec2-user@10.2.3.10
+ssh -i tgw-lab-key.pem ec2-user@10.2.4.10
+curl -sk https://10.1.3.10
+curl -s http://10.2.2.10
+curl -sk https://10.2.2.10
+curl -sk https://10.2.3.10
+curl -sk https://10.2.4.10
+curl -s --connect-timeout 5 http://10.3.1.10
 ```
 
-## Useful outputs
+Expected:
 
-After `apply`, the environment exposes the values you need most often:
+- `200` for the VPC-B and VPC-C targets
+- failure for `D1`
+
+### SSM netchecks
+
+Canonical netcheck scripts live under `artifacts/scripts/`:
+
+- `netcheck-a1.ps1`
+- `netcheck.sh`
+- `ssm-netcheck-a1.yml`
+- `ssm-netcheck-a2.yml`
+
+Canonical SSM documents:
+
+- `lab-netcheck-a1`
+- `lab-netcheck-a2`
+
+The deploy script uploads the script payloads to:
+
+- `s3://terraform-lab-wgl/ssm/netcheck/a1/`
+- `s3://terraform-lab-wgl/ssm/netcheck/a2/`
+- `s3://terraform-lab-wgl/ssm/netcheck/docs/`
+
+The deploy script also stores SSM command output under:
+
+- `s3://terraform-lab-wgl/deploy/netchecks/<timestamp>/a1/`
+- `s3://terraform-lab-wgl/deploy/netchecks/<timestamp>/a2/`
+
+## Current Nuances And Lessons Learned
+
+These items are codified in Terraform and should remain true unless the architecture is intentionally changed.
+
+### 1. Per-subnet route tables and NACLs are required
+
+The stable design is per-subnet, not per-VPC. Future changes should preserve:
+
+- one route table per subnet
+- one NACL per subnet
+- explicit TGW associations
+- explicit TGW route entries
+
+### 2. `lab-rt-b-untrust` needs explicit return routes
+
+The B1 untrust subnet must keep:
+
+- `10.0.0.0/16 -> TGW1`
+- `10.2.0.0/16 -> TGW1`
+- `10.3.0.0/16 -> TGW2`
+- `0.0.0.0/0 -> IGW`
+
+Without those return routes, ping may work while TCP fails.
+
+### 3. VPC-C route tables need default egress through `TGW1`
+
+The VPC-C subnets use centralized egress:
+
+- `0.0.0.0/0 -> TGW1 -> VPC-A NAT`
+
+That is required for package installation, updates, and bootstrap resilience.
+
+### 4. `nacl-a` needs the service-port return path
+
+Because `A2` and the TGW attachment share the VPC-A subnet, `nacl-a` must retain:
+
+- ingress `111` tcp `80` from `10.0.0.0/16`
+- ingress `112` tcp `443` from `10.0.0.0/16`
+- ingress `113` tcp `8443` from `10.0.0.0/16`
+- egress `125` tcp `80` to `10.2.0.0/16`
+
+### 5. `nacl-c-dmz` needs rule `96`
+
+The VPC-C DMZ subnet must keep:
+
+- egress `96` tcp `80` to `10.2.2.0/24`
+
+That rule is part of the working A2/A1 -> C1 HTTP path.
+
+### 6. C1 bootstrap is more sensitive than the other Linux nodes
+
+`C1` needs full nginx configuration with TLS, not just a placeholder listener.
+
+Required behavior:
+
+- stop any placeholder server on `80` and `443`
+- install nginx and openssl
+- generate `/etc/nginx/ssl/selfsigned.crt` and `selfsigned.key`
+- write `/etc/nginx/conf.d/ssl.conf`
+- enable and restart nginx
+
+### 7. The deploy script is the canonical convergence workflow
+
+The repo is now designed around:
+
+- golden AMI reuse
+- S3-hosted bootstrap assets
+- A2-driven Linux post-bootstrap
+- SSM netchecks
+
+Do not assume `terraform apply` alone is the full deployment process.
+
+## Outputs You Will Use Most
+
+Important outputs from `terraform output`:
 
 - `a1_windows_public_ip`
 - `a2_linux_public_ip`
+- `alb_dns_name`
+- `nat_gateway_eip`
 - `private_ips`
-- `public_ips`
 - `instance_ids`
 - `rdp_password_decrypt_command`
 - `test_commands`
 - `validation_targets`
 
-Show them with:
+`alb_dns_name` is the public customer-entry DNS name. The output name remains `alb_dns_name` for compatibility.
 
-```bash
-terraform output
-terraform output -json
-```
+## Repository Structure
 
-## How to access the lab
+Main areas:
 
-### A1 Windows bastion
+- `modules/network` - VPCs, subnets, route tables, TGWs, NACLs, NAT, customer-entry LB
+- `modules/security` - security groups
+- `modules/compute` - EC2 instances, ENIs, key pair, user data, AMI overrides
+- `environments/dev` - working lab environment
+- `artifacts/scripts` - canonical deployment, teardown, bootstrap, and netcheck scripts
+- `artifacts/skills` - project-specific operator guidance
+- `artifacts/prompts` - Copilot session instructions and handoff prompts
+- `artifacts/results` - human-readable reports and raw validation output
 
-Use `A1` when you want a browser inside the management segment.
+## Teardown
 
-1. Get the public IP:
-
-```bash
-terraform output -raw a1_windows_public_ip
-```
-
-2. Get the Windows Administrator password by running the command emitted by:
-
-```bash
-terraform output -raw rdp_password_decrypt_command
-```
-
-3. Open an RDP session to the returned `A1` public IP.
-4. Launch Chrome on `A1`.
-5. Browse to:
-
-- `https://10.1.3.10`
-- `https://10.2.2.10`
-- `https://10.2.3.10`
-- `https://10.2.4.10`
-- `https://10.3.1.10`
-
-These direct private-IP targets replace the older internal NLB checks.
-
-Expected behavior:
-
-- `B1` loads after a certificate warning
-- `C1`, `C2`, and `C3` load after certificate warnings
-- `D1` does not load
-
-### A2 Linux bastion
-
-Use `A2` for SSH, CLI checks, and most day-to-day validation.
-
-Get the public IP and connect:
-
-```bash
-terraform output -raw a2_linux_public_ip
-ssh -i tgw-lab-key.pem ec2-user@$(terraform output -raw a2_linux_public_ip)
-```
-
-If you want to SSH onward from inside `A2`, make sure your key is available there through agent forwarding or by temporarily placing the PEM on the host. Once connected, validate the main paths:
-
-```bash
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.3.10
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.2.10
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.3.10
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.4.10
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.3.1.10
-curl -sk --connect-timeout 5 -o /dev/null -w "%{http_code}" https://10.1.3.10
-curl -sk --connect-timeout 5 -o /dev/null -w "%{http_code}" https://10.2.2.10
-curl -sk --connect-timeout 5 -o /dev/null -w "%{http_code}" https://10.2.3.10
-curl -sk --connect-timeout 5 -o /dev/null -w "%{http_code}" https://10.2.4.10
-curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://10.3.1.10
-ping -c 3 10.1.3.10
-ping -c 3 10.2.2.10
-ping -c 3 10.2.3.10
-ping -c 3 10.2.4.10
-ping -c 3 10.3.1.10
-```
-
-Expected behavior:
-
-- SSH, HTTPS, and ping to `B1` succeed
-- SSH, HTTPS, and ping to `C1`, `C2`, and `C3` succeed
-- SSH, HTTP, and ping to `D1` fail from `A2`
-
-## End-to-end operator model
-
-From your laptop, the intended operational path is:
-
-- laptop -> `A1` over RDP for browser tests
-- laptop -> `A2` over SSH for admin tasks
-- `A2` -> `B1` and `C1` for shared-service validation
-- `B1` -> `D1` for customer-segment validation
-
-This is important: only `A1` and `A2` are expected to be directly reachable from the public internet. `B1`, `C1`, and `D1` are private-only instances by design.
-
-## Validation notes
-
-The initial deployment results are captured in [2026-04-03_initial-deployment.md](C:/Users/Willi/projects/Labs/artifacts/results/2026-04-03_initial-deployment.md).
-
-As of the initial deployment:
-
-- all terminal-verifiable pass and fail cases matched the intended design
-- the A1 Chrome checks remain a manual operator step
-
-## Teardown and cost cleanup
-
-Use [teardown.ps1](C:/Users/Willi/projects/Labs/terraform-aws/scripts/teardown.ps1) when you want to remove the lab and stop ongoing AWS charges.
-
-By default, the teardown script removes:
-
-- EC2 instances and their attached root volumes
-- VPCs, subnets, route tables, Internet Gateway, security groups, and NACLs
-- both Transit Gateways and all TGW attachments
-- the remote Terraform backend bucket and DynamoDB lock table
-
-The script intentionally does not remove:
-
-- local repository files
-- local `terraform.tfvars`
-- local key material such as `tgw-lab-key.pem`
-- IAM users, groups, roles, and access keys
-
-Run the full teardown from the repository root:
+Use the canonical teardown entrypoint from the repository root:
 
 ```powershell
-cd terraform-aws
-.\scripts\teardown.ps1 -Environment dev -Force
+.\artifacts\scripts\teardown.ps1 -Environment dev -Force
 ```
 
-If you want to destroy the lab resources but keep the backend state storage:
+Keep the backend if needed:
 
 ```powershell
-cd terraform-aws
-.\scripts\teardown.ps1 -Environment dev -KeepBackend -Force
+.\artifacts\scripts\teardown.ps1 -Environment dev -KeepBackend -Force
 ```
 
-What the script does:
-
-1. initializes Terraform against the configured backend
-2. runs `terraform destroy -auto-approve`
-3. checks for residual tagged lab resources in AWS
-4. deletes the backend S3 bucket and DynamoDB table unless `-KeepBackend` is set
-
-Recommended operator sequence:
-
-1. Make sure no one is actively using `A1` or `A2`.
-2. If you want an audit trail, save `terraform output -json` and any screenshots before teardown.
-3. Run the teardown script with `-Force`.
-4. If you kept the backend, verify you still want to retain state before the next deployment.
-
-## Billing and cost access note
-
-This lab can be torn down entirely from Terraform and AWS CLI, but AWS cost tooling has one extra account-level caveat: Cost Explorer may still need to be enabled in the Billing and Cost Management console before API calls succeed for an IAM user.
-
-If `aws ce get-cost-and-usage` returns `AccessDeniedException` with `User not enabled for cost explorer access`, the IAM policy is not the only dependency. The account-level Cost Explorer feature still needs to be enabled in the Billing console.
-
-Some cost-management features also have account-scope prerequisites. For example, Billing Conductor actions only work from a payer account, so attaching IAM permissions alone does not make those APIs usable from a non-payer account.
+The teardown script is the cost-control path. Use it when you are finished with the lab.

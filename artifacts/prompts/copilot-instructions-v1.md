@@ -1,285 +1,103 @@
-# Copilot Instructions — TGW Segmentation Lab
+# Copilot Instructions - TGW Segmentation Lab
 
-## ⚠️ MANDATORY: READ THIS FILE COMPLETELY BEFORE TAKING ANY ACTION
+## Mandatory
 
-You are assisting with the deployment and validation of a dual-Transit-Gateway AWS segmentation
-lab. This lab simulates a real DoD-adjacent cloud architecture used in an IL4/IL5 GovCloud
-environment. Treat all work as if it will be reviewed by a senior cloud security engineer.
+Read this file, the relevant local skill files, and the task prompt before taking action.
 
----
+Treat the lab as production-quality infrastructure work. The standard is correctness, repeatability, and minimal wasted operator time.
 
-## 0. Workflow — Follow This Order Every Time
+## Default Workflow
 
-```
-1. READ   → Read this file and all skill files before doing anything
-2. SEARCH → Web-search to validate any command, resource, or config before running it
-3. PLAN   → State what you are about to do and why
-4. EXECUTE → Run the command or apply the change
-5. VERIFY → Confirm the result is correct
-6. REPORT → Write your findings to artifacts/results/
-```
+Use this order unless the task explicitly says otherwise:
 
-Do not skip steps. Do not run a command you have not first validated via web search.
+1. Read only the files relevant to the task.
+2. Verify whether the task is already done in AWS or in the repo.
+3. Reuse existing scripts and prompts instead of rebuilding the workflow from scratch.
+4. State the action briefly.
+5. Execute.
+6. Verify the result.
+7. Write a concise report only if the task or session requires one.
 
----
+Optimize for low-noise execution:
 
-## 1. Project Context
+- skip already-completed steps once they are verified
+- batch read-only inspection commands where possible
+- use the canonical repo scripts instead of long ad hoc command sequences
+- do not re-open resolved architecture debates unless the live state disagrees with the repo
 
-### What This Lab Is
+## Current Architecture
 
-A Terraform-managed AWS lab that simulates a segmented cloud architecture with:
+This is the current working architecture. Future sessions should assume this unless the user says the design has changed.
 
-- **VPC-A** (`10.0.0.0/16`) — Cloud Host / Management VPC
-  - `A1`: Windows Server 2022 (`t3.medium`) — RDP access, Chrome browser, used to reach B1/C1 via HTTP
-  - `A2`: Amazon Linux 2023 (`t3.micro`) — SSH jump box, used to SSH into B1 and C1
+- VPC-A `10.0.0.0/16`
+  - `A1` Windows RDP and browser host
+  - `A2` Linux SSH and bootstrap host
+- VPC-B `10.1.0.0/16`
+  - `B1` Palo Alto simulation with three ENIs
+  - operator validation target is `10.1.3.10`
+- VPC-C `10.2.0.0/16`
+  - `C1` portal `10.2.2.10`
+  - `C2` gateway `10.2.3.10`
+  - `C3` controller `10.2.4.10`
+- VPC-D `10.3.0.0/16`
+  - `D1` customer `10.3.1.10`
+- `TGW1` connects A, B, and C
+- `TGW2` connects B, C, and D
+- VPC-A must not have direct reachability to VPC-D
 
-- **VPC-B** (`10.1.0.0/16`) — Palo Alto NGFW simulation
-  - `B1`: Amazon Linux 2023 (`t3.micro`) — nginx serving a styled HTML page
+Architecture facts that matter operationally:
 
-- **VPC-C** (`10.2.0.0/16`) — AppGate SDP simulation
-  - `C1`: Amazon Linux 2023 (`t3.micro`) — nginx serving a styled HTML page
+- internal `NLB-B` and `NLB-C` are removed
+- operator validation from VPC-A uses direct private IPs
+- one public customer-entry load balancer still exists in VPC-B untrust
+- Route 53 is not part of the custom lab architecture
+- `alb_dns_name` is the compatibility output name for the public customer-entry load balancer
 
-- **VPC-D** (`10.3.0.0/16`) — Customer VPC
-  - `D1`: Amazon Linux 2023 (`t3.micro`) — curl/SSH test client
+## Canonical Skill Paths
 
-### Transit Gateway Architecture
+Use these local skill files:
 
-```
-TGW-1 (MGMT):      VPC-A <-> VPC-B <-> VPC-C
-TGW-2 (CUSTOMER):  VPC-D <-> VPC-B <-> VPC-C
+- `artifacts/skills/terraform-skill.md`
+- `artifacts/skills/aws-cli-skill.md`
+- `artifacts/skills/network-troubleshooting/SKILL.md`
 
-VPC-A and VPC-D share NO transit gateway.
-There is physically no network path between them.
-```
+Do not use the old nonexistent paths such as `artifacts/skills/terraform/SKILL.md`.
 
-### Intended Traffic Flows
+## Canonical Script Paths
 
-| Source | Destination | Expected | Mechanism |
-|--------|-------------|----------|-----------|
-| A1 (Chrome) | B1:80 | ✅ PASS | TGW-1 MGMT RT |
-| A1 (Chrome) | C1:80 | ✅ PASS | TGW-1 MGMT RT |
-| A2 (SSH) | B1:22 | ✅ PASS | TGW-1 MGMT RT |
-| A2 (SSH) | C1:22 | ✅ PASS | TGW-1 MGMT RT |
-| A1/A2 | D1 | ❌ FAIL | No shared TGW |
-| D1 (curl) | B1:80 | ✅ PASS | TGW-2 CUSTOMER RT |
-| D1 (curl) | C1:80 | ✅ PASS | TGW-2 CUSTOMER RT |
-| D1 | A1/A2 | ❌ FAIL | No shared TGW |
-| B1 (SSH) | D1:22 | ✅ PASS | TGW-2 return path |
-| B1 | C1 | ✅ PASS | B<->C unrestricted |
+Use these before inventing a new workflow:
 
-### Security Layers
+- deploy: `artifacts/scripts/deploy.ps1`
+- teardown: `artifacts/scripts/teardown.ps1`
+- A2 netcheck: `artifacts/scripts/netcheck.sh`
+- A1 netcheck: `artifacts/scripts/netcheck-a1.ps1`
+- SSM docs:
+  - `artifacts/scripts/ssm-netcheck-a1.yml`
+  - `artifacts/scripts/ssm-netcheck-a2.yml`
 
-Each VPC has both a Security Group (stateful) and an explicit NACL (stateless).
-Every NACL explicitly allows ephemeral ports (1024-65535) on return paths.
-NACLs are the outer ring; Security Groups are the inner ring.
+## Deployment Rules
 
----
+For a fresh or rebuilt environment, prefer:
 
-## 2. File Structure
-
-```
-C:\Users\Willi\projects\Labs\terraform-aws/
-├── C:\Users\Willi\projects\Labs\terraform-aws\environments\dev\main.tf              # All resources: VPCs, subnets, TGWs, SGs, NACLs, instances
-├── C:\Users\Willi\projects\Labs\terraform-aws\environments\dev\variables.tf         # region, public_key
-├── C:\Users\Willi\projects\Labs\terraform-aws\environments\dev\outputs.tf           # IPs, RDP password command, test matrix
-├── C:\Users\Willi\projects\Labs\terraform-aws\environments\dev\README.md           # Human-readable deploy guide
-└── C:\Users\Willi\projects\Labs\artifacts
-    ├── copilot-instructions.md   ← YOU ARE HERE
-    ├── skills/
-    │   ├── terraform/SKILL.md    # Terraform patterns and validation rules
-    │   └── aws-cli/SKILL.md      # AWS CLI patterns and validation rules
-    └── results/                  # Write all reports here after each task
+```powershell
+.\artifacts\scripts\deploy.ps1 -Environment dev
 ```
 
----
+Reason:
 
-## 3. Security Standards You Must Enforce
+- it seeds S3 assets
+- creates or reuses golden AMIs
+- writes the AMI override file
+- applies Terraform in phases
+- attaches SSM profiles
+- bootstraps nginx through A2
+- runs SSM netchecks
 
-Before running or applying anything, validate against these standards:
+Do not default to raw `terraform apply` when the user asks for a deployment outcome.
 
-### Terraform
-- All resources must have `Name` tags
-- No hardcoded credentials anywhere — use variables or instance profiles
-- `default_route_table_association = "disable"` and `default_route_table_propagation = "disable"` must be set on all TGWs
-- Security Groups must not use `0.0.0.0/0` for ingress except for public-facing ports (RDP:3389, SSH:22) on bastion/jump boxes
-- NACLs must be explicit — never rely on the AWS default NACL
-- Egress rules must be scoped to known CIDRs where possible, not `0.0.0.0/0`
-- `associate_public_ip_address = true` only on A1 and A2 — all other instances are private
+## Terraform Rules
 
-### AWS CLI
-- Always use `--region` explicitly — never rely on environment defaults
-- Always confirm resource state after creation (`describe`, `get`, `list`)
-- Never delete a resource without first confirming what depends on it
-- Use `--dry-run` where supported before destructive operations
-
-### General
-- Web-search to confirm any AWS resource argument that may have changed since your training cutoff
-- Check the Terraform AWS provider changelog if using any resource introduced after 2023
-- Flag any finding that would fail a CIS AWS Foundations Benchmark check
-
----
-
-## 4. Validation Checklist Before `terraform apply`
-
-Run through this before every apply:
-
-- [ ] `terraform fmt` — no formatting errors
-- [ ] `terraform validate` — no syntax errors
-- [ ] `terraform plan` — review all changes, confirm no unexpected destroys
-- [ ] Web-search: confirm AMI filter patterns for `al2023-ami-*-x86_64` are still current
-- [ ] Web-search: confirm `Windows_Server-2022-English-Full-Base-*` AMI name pattern is current
-- [ ] Web-search: confirm TGW attachment arguments haven't changed in the provider version in use
-- [ ] Confirm all NACLs have ephemeral port rules on both inbound and outbound
-- [ ] Confirm no SG has `0.0.0.0/0` ingress on ports other than 22 and 3389
-
----
-
-## 5. Validation Checklist After `terraform apply`
-
-Run these AWS CLI checks after every deployment:
-
-```bash
-# Confirm TGW route tables have correct static routes
-aws ec2 search-transit-gateway-routes \
-  --transit-gateway-route-table-id <TGW1_RT_ID> \
-  --filters Name=state,Values=active \
-  --region <REGION>
-
-# Confirm VPC route tables have TGW entries
-aws ec2 describe-route-tables \
-  --filters Name=vpc-id,Values=<VPC_A_ID> \
-  --region <REGION>
-
-# Confirm SG rules on B1
-aws ec2 describe-security-groups \
-  --group-ids <SG_B_ID> \
-  --region <REGION>
-
-# Confirm NACL rules on subnet-b
-aws ec2 describe-network-acls \
-  --filters Name=association.subnet-id,Values=<SUBNET_B_ID> \
-  --region <REGION>
-
-# Confirm instances are running
-aws ec2 describe-instances \
-  --filters Name=tag:Name,Values=lab-* Name=instance-state-name,Values=running \
-  --query 'Reservations[*].Instances[*].[Tags[?Key==`Name`].Value|[0],InstanceId,PrivateIpAddress,PublicIpAddress,State.Name]' \
-  --output table \
-  --region <REGION>
-```
-
----
-
-## 6. Connectivity Tests to Run
-
-After deployment, run all of these and record pass/fail in results/:
-
-### From A2 (Linux SSH jump — run via SSH)
-```bash
-# SSH tests
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@<B1_IP>   # expect: PASS
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@<C1_IP>   # expect: PASS
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@<D1_IP>   # expect: FAIL (timeout)
-
-# HTTP tests
-curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://<B1_IP>   # expect: 200
-curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://<C1_IP>   # expect: 200
-curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://<D1_IP>   # expect: 000 (no route)
-
-# Ping tests
-ping -c 3 <B1_IP>   # expect: PASS
-ping -c 3 <C1_IP>   # expect: PASS
-ping -c 3 <D1_IP>   # expect: FAIL
-```
-
-### From B1 (hop to D1 — run via SSH into B1 first)
-```bash
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@<D1_IP>   # expect: PASS
-ping -c 3 <D1_IP>                                               # expect: PASS
-```
-
-### From D1 (via B1 hop — run via SSH into D1 via B1)
-```bash
-curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://<B1_IP>   # expect: 200
-curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://<C1_IP>   # expect: 200
-curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://<A2_IP>   # expect: 000 (no route)
-```
-
-### From A1 (Windows — manual browser test)
-```
-Open Chrome → http://<B1_IP>  → should load Palo Alto NGFW page
-Open Chrome → http://<C1_IP>  → should load AppGate SDP page
-Open Chrome → http://<D1_IP>  → should time out
-```
-
----
-
-## 7. Reporting Requirements
-
-After completing any task, write a report to `artifacts/results/`.
-
-### Filename format
-```
-artifacts/results/YYYY-MM-DD_<task-name>.md
-```
-
-### Required report sections
-```markdown
-# Task: <description>
-Date: YYYY-MM-DD
-Performed by: GitHub Copilot
-
-## Web Search Validations
-- [ ] <what you searched> → <what you confirmed>
-
-## Actions Taken
-1. <command or change>
-   Result: <output or confirmation>
-
-## Connectivity Test Results
-| Test | Expected | Actual | Pass/Fail |
-|------|----------|--------|-----------|
-
-## Issues Found
-- <any deviations, unexpected results, or security concerns>
-
-## Recommendations
-- <any suggested improvements>
-```
-
----
-
-## 8. What You Must NOT Do
-
-- Do not run `terraform destroy` without explicit instruction
-- Do not modify `main.tf` without running `terraform plan` first and showing the plan
-- Do not skip the web search validation step
-- Do not assume AMI IDs — always use `data` sources with filters
-- Do not hardcode region — always use `var.region`
-- Do not open `0.0.0.0/0` on any port other than 22 (A2) and 3389 (A1)
-- Do not add VPC peering between VPC-A and VPC-D — this breaks the segmentation design
-- Do not rely on default TGW route tables — they are explicitly disabled in this config
-
----
-
-## 9. Skills Reference
-
-Read these before working with the respective tools:
-
-- **Terraform**: `artifacts/skills/terraform/SKILL.md`
-- **AWS CLI**: `artifacts/skills/aws-cli/SKILL.md`
-
-## Session 2026-04-04 - Operational Lessons
-
-### Skill File Paths
-Local skill files use flat filenames, not subdirectory `SKILL.md` paths:
-- CORRECT: `artifacts/skills/terraform-skill.md`
-- CORRECT: `artifacts/skills/aws-cli-skill.md`
-- CORRECT: `artifacts/skills/network-troubleshooting/SKILL.md`
-- WRONG: `artifacts/skills/terraform/SKILL.md`
-
-### PowerShell Stop-Parsing
-Always use `terraform --%` for Terraform commands in PowerShell:
+Use PowerShell stop-parsing for Terraform:
 
 ```powershell
 terraform --% init -backend-config=backend.hcl
@@ -287,25 +105,98 @@ terraform --% plan -out=tfplan -no-color
 terraform --% apply tfplan
 ```
 
-### Destroy Count Threshold
-The safe destroy threshold for the full refactor is `135`.
-The hard constraint is:
-- no `aws_vpc`
-- no `aws_ec2_transit_gateway`
-- no `aws_ec2_transit_gateway_vpc_attachment`
-in the destroy list.
+Before apply:
 
-Raw destroy count alone is not a safe/unsafe signal for this architecture change.
+- run `terraform fmt`
+- run `terraform validate`
+- review the destroy set
 
-### npx skills add requires --yes flag
-Interactive prompts break non-interactive Copilot sessions.
-Always use:
+Hard stop resources in destroy or replace:
 
-```bash
-npx skills add --yes <skill-path>
-```
+- `aws_vpc`
+- `aws_ec2_transit_gateway`
+- `aws_ec2_transit_gateway_vpc_attachment`
 
-### MCP servers not available in Codex environment
-The HashiCorp Terraform MCP and AWS Labs Terraform MCP servers may be configured
-in VS Code settings, but they are not available in the Codex agent environment.
-Proceed without them and use web search for provider documentation instead.
+Raw destroy count alone is not enough. This lab has already had a safe `131`-destroy refactor driven by per-subnet route-table and NACL replacement.
+
+## Validation Rules
+
+Primary operator validation targets from VPC-A:
+
+- `https://10.1.3.10`
+- `http://10.2.2.10`
+- `https://10.2.2.10`
+- `https://10.2.3.10`
+- `https://10.2.4.10`
+
+Negative control:
+
+- `10.3.1.10` must fail from VPC-A
+
+Do not default to the removed internal NLB DNS names. If a prompt or report still references them, treat that as stale guidance.
+
+Prefer SSM netchecks for routine validation:
+
+- `lab-netcheck-a1`
+- `lab-netcheck-a2`
+
+## AWS CLI Rules
+
+- always use `--region`
+- prefer `--output json` in PowerShell
+- redirect large outputs to files under `artifacts/tmp` or `artifacts/results` when needed
+- verify whether a manual fix already exists before re-running it
+
+When a command is likely to be blocked by IAM on-instance, verify whether that is an expected role limitation before treating it as a broken lab.
+
+## Lessons Learned That Must Persist
+
+### Route tables
+
+`lab-rt-b-untrust` must retain:
+
+- `10.0.0.0/16 -> TGW1`
+- `10.2.0.0/16 -> TGW1`
+- `10.3.0.0/16 -> TGW2`
+
+All VPC-C subnet route tables must retain:
+
+- `0.0.0.0/0 -> TGW1`
+
+### NACLs
+
+`nacl-a` must retain:
+
+- ingress `111` tcp `80`
+- ingress `112` tcp `443`
+- ingress `113` tcp `8443`
+- egress `125` tcp `80`
+
+`nacl-c-dmz` must retain:
+
+- egress `96` tcp `80` to `10.2.2.0/24`
+
+### Service validation
+
+- `B1` is validated on `10.1.3.10`
+- `C3` landing page validation is on `443`, not `8443`
+- `C1` is the sensitive nginx/TLS bootstrap node
+
+### Deploy optimization
+
+- golden AMI reuse is part of the intended workflow
+- S3-hosted bootstrap assets are part of the intended workflow
+- SSM command documents are part of the intended workflow
+
+## MCP And External Skill Notes
+
+- `npx skills add` must use `--yes` in non-interactive sessions
+- MCP servers may exist in editor settings but are not guaranteed in the Codex environment
+- if MCP is unavailable, proceed with local files, existing scripts, AWS CLI, and web verification when required
+
+## What Not To Do
+
+- do not run `terraform destroy` unless explicitly asked
+- do not assume Route 53, internal load balancers, or one-subnet-per-VPC designs are still current
+- do not re-run a known manual fix without first checking whether it is already present
+- do not spend tokens reading unrelated files when the task scope is narrower

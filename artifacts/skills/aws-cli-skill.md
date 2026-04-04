@@ -1,356 +1,274 @@
-# Skill: AWS CLI — Lab Validation and Operations
+# Skill: AWS CLI - Lab Validation and Operations
 
 ## Purpose
-This skill defines the AWS CLI patterns Copilot must use to validate, inspect, and
-troubleshoot the TGW segmentation lab after deployment.
 
----
+This skill defines the current AWS CLI workflow for validating and troubleshooting the TGW segmentation lab after deployment.
+
+Use it for:
+
+- live environment verification
+- route, NACL, SG, TGW, and SSM inspection
+- confirming whether a manual fix already exists before changing code
+- cost and cleanup inspection
 
 ## Global Rules
 
-1. Always include `--region <REGION>` on every command — never rely on environment defaults
-2. Always confirm resource state after creation before moving to the next step
-3. Use `--output table` for human-readable inspection, `--output json` when parsing output
-4. Use `--query` to filter output to only what is needed
-5. Web-search `aws cli <command> <resource>` before running any command you haven't used recently
+1. Always use `--region`.
+2. Confirm identity first.
+3. Prefer `--output json` in PowerShell and write complex output to files.
+4. Use `--query` only when it clearly simplifies the result.
+5. Verify whether a live fix already exists before re-running a manual command.
 
----
+## Current Architecture Facts
 
-## Pre-Flight: Confirm AWS Identity
+Assume these are true unless the user explicitly says the architecture has changed:
 
-Always run this first to confirm you're operating in the correct account and region:
+- no internal `NLB-B` or `NLB-C`
+- direct private-IP validation from VPC-A
+- one public customer-entry load balancer only
+- no custom Route 53 resources in use
+- `alb_dns_name` is the compatibility output name for the public customer-entry load balancer
 
-```bash
-aws sts get-caller-identity
+Current direct validation targets:
+
+- `10.1.3.10`
+- `10.2.2.10`
+- `10.2.3.10`
+- `10.2.4.10`
+
+`10.3.1.10` must remain unreachable from VPC-A.
+
+## Preflight
+
+Always start with:
+
+```powershell
+aws sts get-caller-identity --output json --region us-east-1
 aws configure get region
 ```
 
-Expected: the account ID should match the account where Terraform was applied.
+## PowerShell Output Rules
 
----
+For complex resources, use:
+
+```powershell
+aws ec2 describe-network-acls --output json > nacl.json
+aws ec2 describe-route-tables --output json > routes.json
+aws ec2 describe-security-group-rules --output json > sg.json
+```
+
+Avoid `--output table` when the result is going to be parsed or saved.
+
+JMESPath boolean filters with backticks are fragile in PowerShell. If a boolean query becomes awkward, capture JSON and filter afterward.
 
 ## Instance Inventory
 
-Get all lab instances with their IPs and state:
-
-```bash
-aws ec2 describe-instances \
-  --filters \
-    "Name=tag:Name,Values=lab-*" \
-    "Name=instance-state-name,Values=running" \
-  --query 'Reservations[*].Instances[*].{
-      Name:Tags[?Key==`Name`]|[0].Value,
-      ID:InstanceId,
-      Type:InstanceType,
-      PrivateIP:PrivateIpAddress,
-      PublicIP:PublicIpAddress,
-      State:State.Name,
-      AZ:Placement.AvailabilityZone
-    }' \
-  --output table \
-  --region <REGION>
+```powershell
+aws ec2 describe-instances `
+  --filters "Name=tag:Project,Values=tgw-segmentation-lab" "Name=instance-state-name,Values=running" `
+  --query "Reservations[*].Instances[*].{Name:Tags[?Key=='Name']|[0].Value,ID:InstanceId,PrivateIP:PrivateIpAddress,PublicIP:PublicIpAddress,State:State.Name}" `
+  --output json `
+  --region us-east-1
 ```
 
----
+## TGW Validation
 
-## Transit Gateway Validation
+List TGWs:
 
-### List TGWs
-```bash
-aws ec2 describe-transit-gateways \
-  --filters "Name=tag:Name,Values=lab-tgw*" \
-  --query 'TransitGateways[*].{Name:Tags[?Key==`Name`]|[0].Value,ID:TransitGatewayId,State:State}' \
-  --output table \
-  --region <REGION>
+```powershell
+aws ec2 describe-transit-gateways `
+  --filters "Name=tag:Name,Values=lab-tgw*" `
+  --output json `
+  --region us-east-1
 ```
 
-### List TGW Route Tables
-```bash
-aws ec2 describe-transit-gateway-route-tables \
-  --filters "Name=tag:Name,Values=tgw*-rt-*" \
-  --query 'TransitGatewayRouteTables[*].{Name:Tags[?Key==`Name`]|[0].Value,ID:TransitGatewayRouteTableId,State:State}' \
-  --output table \
-  --region <REGION>
+List TGW route tables:
+
+```powershell
+aws ec2 describe-transit-gateway-route-tables `
+  --filters "Name=tag:Name,Values=tgw*-rt-*" `
+  --output json `
+  --region us-east-1
 ```
 
-### Validate Routes in a TGW Route Table
-```bash
-aws ec2 search-transit-gateway-routes \
-  --transit-gateway-route-table-id <TGW_RT_ID> \
-  --filters "Name=state,Values=active" \
-  --query 'Routes[*].{CIDR:DestinationCidrBlock,State:State,Type:Type,Attachment:TransitGatewayAttachments[0].ResourceId}' \
-  --output table \
-  --region <REGION>
+Search routes:
+
+```powershell
+aws ec2 search-transit-gateway-routes `
+  --transit-gateway-route-table-id <tgw-rtb-id> `
+  --filters "Name=state,Values=active" `
+  --output json `
+  --region us-east-1
 ```
 
-Expected routes for TGW-1 (MGMT RT):
-- `10.0.0.0/16` → VPC-A attachment
-- `10.1.0.0/16` → VPC-B attachment
-- `10.2.0.0/16` → VPC-C attachment
+Expected management TGW routes:
 
-Expected routes for TGW-2 (CUSTOMER RT):
-- `10.3.0.0/16` → VPC-D attachment
-- `10.1.0.0/16` → VPC-B attachment
-- `10.2.0.0/16` → VPC-C attachment
+- `10.0.0.0/16`
+- `10.1.0.0/16`
+- `10.2.0.0/16`
+- default `0.0.0.0/0` toward VPC-A for centralized egress
 
-### Validate TGW Attachments
-```bash
-aws ec2 describe-transit-gateway-vpc-attachments \
-  --filters "Name=state,Values=available" \
-  --query 'TransitGatewayVpcAttachments[*].{Name:Tags[?Key==`Name`]|[0].Value,ID:TransitGatewayAttachmentId,VPC:VpcId,State:State}' \
-  --output table \
-  --region <REGION>
+Expected customer TGW routes:
+
+- `10.1.0.0/16`
+- `10.2.0.0/16`
+- `10.3.0.0/16`
+- default `0.0.0.0/0` toward VPC-B
+
+Important nuance:
+
+- The A2 diagnostic role may not always include `ec2:SearchTransitGatewayRoutes`.
+- If `search-transit-gateway-routes` fails on A2, treat that first as an IAM limitation, not automatic proof of a broken TGW route.
+
+## Route Table Validation
+
+Check the subnet route tables that matter, not just the VPC:
+
+```powershell
+aws ec2 describe-route-tables `
+  --filters "Name=tag:Name,Values=lab-rt-*" `
+  --output json `
+  --region us-east-1
 ```
 
----
+Critical current expectations:
 
-## VPC Route Table Validation
-
-### Describe route table for a specific VPC
-```bash
-aws ec2 describe-route-tables \
-  --filters "Name=vpc-id,Values=<VPC_ID>" \
-  --query 'RouteTables[*].Routes[*].{Dest:DestinationCidrBlock,Target:TransitGatewayId,GW:GatewayId,State:State}' \
-  --output table \
-  --region <REGION>
-```
-
-Expected for VPC-A route table:
-- `0.0.0.0/0` → Internet Gateway (IGW)
-- `10.1.0.0/16` → TGW-1
-- `10.2.0.0/16` → TGW-1
-- No entry for `10.3.0.0/16` (VPC-D must not be reachable from A)
-
-Expected for VPC-D route table:
-- `10.1.0.0/16` → TGW-2
-- `10.2.0.0/16` → TGW-2
-- No entry for `10.0.0.0/16` (VPC-A must not be reachable from D)
-- No IGW entry (D1 is private)
-
----
-
-## Security Group Validation
-
-### Describe a Security Group's rules
-```bash
-aws ec2 describe-security-groups \
-  --group-ids <SG_ID> \
-  --query 'SecurityGroups[0].{
-      Name:GroupName,
-      Ingress:IpPermissions,
-      Egress:IpPermissionsEgress
-    }' \
-  --output json \
-  --region <REGION>
-```
-
-### Quick ingress-only view
-```bash
-aws ec2 describe-security-group-rules \
-  --filters "Name=group-id,Values=<SG_ID>" \
-  --query 'SecurityGroupRules[?IsEgress==`false`].{
-      Port:FromPort,
-      ToPort:ToPort,
-      Protocol:IpProtocol,
-      CIDR:CidrIpv4,
-      Desc:Description
-    }' \
-  --output table \
-  --region <REGION>
-```
-
-### Security check — find any SG with 0.0.0.0/0 ingress on non-management ports
-```bash
-aws ec2 describe-security-groups \
-  --filters "Name=tag:Name,Values=sg-vpc-*" \
-  --query "SecurityGroups[*].{
-      Name:GroupName,
-      OpenRules:IpPermissions[?contains(IpRanges[].CidrIp, '0.0.0.0/0')].{Port:FromPort,Proto:IpProtocol}
-    }" \
-  --output json \
-  --region <REGION>
-```
-
-Flag any result that shows `0.0.0.0/0` on ports other than 22 and 3389.
-
----
+- `lab-rt-b-untrust`
+  - `10.0.0.0/16 -> TGW1`
+  - `10.2.0.0/16 -> TGW1`
+  - `10.3.0.0/16 -> TGW2`
+  - `0.0.0.0/0 -> IGW`
+- VPC-C route tables
+  - `0.0.0.0/0 -> TGW1`
+- VPC-A
+  - `10.1.0.0/16 -> TGW1`
+  - `10.2.0.0/16 -> TGW1`
+  - no direct route to `10.3.0.0/16`
 
 ## NACL Validation
 
-### Describe NACL for a subnet
-```bash
-aws ec2 describe-network-acls \
-  --filters "Name=association.subnet-id,Values=<SUBNET_ID>" \
-  --query 'NetworkAcls[0].Entries[*].{
-      RuleNum:RuleNumber,
-      Direction:Egress,
-      Protocol:Protocol,
-      Action:RuleAction,
-      CIDR:CidrBlock,
-      PortFrom:PortRange.From,
-      PortTo:PortRange.To
-    }' \
-  --output table \
-  --region <REGION>
+Inspect a specific NACL by tag:
+
+```powershell
+aws ec2 describe-network-acls `
+  --filters "Name=tag:Name,Values=nacl-a" `
+  --output json `
+  --region us-east-1
 ```
 
-Note: `Direction: false` = inbound, `Direction: true` = outbound.
+Critical current rules:
 
-### Verify ephemeral port rules exist
-After getting NACL entries, confirm both inbound and outbound have rules covering `1024-65535`.
-If missing, TCP sessions will appear to work at the SG layer but responses will be dropped.
+- `nacl-a`
+  - ingress `111` tcp `80` from `10.0.0.0/16`
+  - ingress `112` tcp `443` from `10.0.0.0/16`
+  - ingress `113` tcp `8443` from `10.0.0.0/16`
+  - egress `125` tcp `80` to `10.2.0.0/16`
+- `nacl-c-dmz`
+  - egress `96` tcp `80` to `10.2.2.0/24`
+- `nacl-c-portal`
+  - VPC-A direct-access rules on `80`, `443`, and `22`
 
----
+Always confirm both directions and the ephemeral return ranges.
 
-## Windows Password Retrieval (A1)
+## Security Group Validation
 
-```bash
-# Wait ~4 minutes after instance launch, then:
-aws ec2 get-password-data \
-  --instance-id <A1_INSTANCE_ID> \
-  --priv-launch-key tgw-lab-key.pem \
-  --query 'PasswordData' \
-  --output text \
-  --region <REGION>
+Inspect an SG:
+
+```powershell
+aws ec2 describe-security-group-rules `
+  --filters "Name=group-id,Values=<sg-id>" `
+  --output json `
+  --region us-east-1
 ```
 
-If the output is empty, the password is not yet available — wait 2 more minutes and retry.
+Current operator expectations:
 
----
+- `B1` mgmt should allow `22` and `443` from `10.0.0.0/16`
+- `C1` should allow `22`, `80`, and `443` from `10.0.0.0/16`
+- `C2` should allow `22` and `443` from `10.0.0.0/16`
+- `C3` should allow `22` and `443` from `10.0.0.0/16`
 
-## Connectivity Testing via SSM (If SSH Key Not Available)
+## Customer-Entry Load Balancer
 
-If you cannot SSH directly, use SSM Session Manager:
+There is still one public load balancer for the customer-entry path.
 
-```bash
-# Start session into A2 (Linux)
-aws ssm start-session \
-  --target <A2_INSTANCE_ID> \
-  --region <REGION>
+Check it with:
 
-# Run a command on an instance without SSH
-aws ssm send-command \
-  --instance-ids <INSTANCE_ID> \
-  --document-name "AWS-RunShellScript" \
-  --parameters 'commands=["curl -s -o /dev/null -w \"%{http_code}\" http://<TARGET_IP>"]' \
-  --query 'Command.CommandId' \
-  --output text \
-  --region <REGION>
-
-# Get result (wait ~10 seconds first)
-aws ssm get-command-invocation \
-  --command-id <COMMAND_ID> \
-  --instance-id <INSTANCE_ID> \
-  --query '[StandardOutputContent,StandardErrorContent]' \
-  --output text \
-  --region <REGION>
+```powershell
+aws elbv2 describe-load-balancers --output json --region us-east-1
+aws elbv2 describe-target-groups --output json --region us-east-1
+aws elbv2 describe-target-health --target-group-arn <tg-arn> --output json --region us-east-1
 ```
 
-Note: SSM requires the instance to have an IAM instance profile with `AmazonSSMManagedInstanceCore`.
-This lab does not include that by default — flag if needed.
+Use it only for the public customer-entry flow. Do not use old internal load balancer assumptions when troubleshooting B or C operator access.
 
----
+## Route 53
 
-## Cost Monitoring
+Current state:
 
-Check current running costs for lab resources:
+- no hosted zones
+- no health checks
+- no registered domains
+- no reusable delegation sets
+- no traffic policies
+- no custom Route 53 Resolver endpoints
 
-```bash
-# List running instances and their types
-aws ec2 describe-instances \
-  --filters "Name=tag:Name,Values=lab-*" "Name=instance-state-name,Values=running" \
-  --query 'Reservations[*].Instances[*].{Name:Tags[?Key==`Name`]|[0].Value,Type:InstanceType,State:State.Name}' \
-  --output table \
-  --region <REGION>
+Do not assume DNS is part of the lab design unless the user explicitly adds it.
 
-# List TGWs (each costs $0.05/hr)
-aws ec2 describe-transit-gateways \
-  --filters "Name=tag:Name,Values=lab-tgw*" \
-  --query 'TransitGateways[*].{Name:Tags[?Key==`Name`]|[0].Value,State:State}' \
-  --output table \
-  --region <REGION>
+## SSM
+
+Current expected diagnostic roles and profiles:
+
+- `lab-a1-diagnostic-role`
+- `lab-a1-diagnostic-profile`
+- `lab-a2-diagnostic-role`
+- `lab-a2-diagnostic-profile`
+
+Current expected policies for the deploy-created diagnostic roles:
+
+- `AmazonSSMManagedInstanceCore`
+- `AmazonEC2ReadOnlyAccess`
+- `ElasticLoadBalancingReadOnly`
+- `AmazonS3ReadOnlyAccess`
+
+Canonical SSM documents:
+
+- `lab-netcheck-a1`
+- `lab-netcheck-a2`
+
+Canonical script payloads in S3:
+
+- `s3://terraform-lab-wgl/ssm/netcheck/a1/netcheck-a1.ps1`
+- `s3://terraform-lab-wgl/ssm/netcheck/a2/netcheck.sh`
+
+Run the SSM documents before falling back to long manual SSH sessions when the task is routine validation.
+
+## Windows Password Retrieval
+
+```powershell
+aws ec2 get-password-data `
+  --instance-id <a1-instance-id> `
+  --priv-launch-key tgw-lab-key.pem `
+  --query "PasswordData" `
+  --output text `
+  --region us-east-1
 ```
 
-Remind user to run `terraform destroy` when lab is complete.
+## Cost And Cleanup
 
----
+Use instance, NAT, TGW, EIP, ELB, and flow-log inspection to find billable resources. When the task is cleanup, prefer the repo teardown script over ad hoc delete commands:
 
-## Useful Filters Reference
+```powershell
+.\artifacts\scripts\teardown.ps1 -Environment dev -Force
+```
 
-| Goal | Filter syntax |
-|---|---|
-| All lab resources | `Name=tag:Name,Values=lab-*` |
-| Running instances only | `Name=instance-state-name,Values=running` |
-| Available TGW attachments | `Name=state,Values=available` |
+## Useful Filters
+
+| Goal | Filter |
+| --- | --- |
+| All lab instances | `Name=tag:Project,Values=tgw-segmentation-lab` |
+| Running instances | `Name=instance-state-name,Values=running` |
+| TGW attachments | `Name=state,Values=available` |
 | Active TGW routes | `Name=state,Values=active` |
-| Specific VPC's route tables | `Name=vpc-id,Values=<VPC_ID>` |
-| Subnet's NACL | `Name=association.subnet-id,Values=<SUBNET_ID>` |
-
-## 2026-04-03 - Architecture refactor destroy count expectations
-
-- A full per-VPC to per-subnet NACL refactor can legitimately destroy about 100 `aws_network_acl_rule` resources. Do not treat that raw count by itself as a failure condition.
-- When reviewing a large refactor, base the stop/go call on resource types. High `aws_network_acl_rule` churn can be expected, but destroys or replacements touching `aws_vpc`, `aws_ec2_transit_gateway`, or `aws_ec2_transit_gateway_vpc_attachment` still require an immediate operator stop and review.
-
-## 2026-04-04 - Direct private-IP validation after NLB removal
-
-- Internal `NLB-B` and `NLB-C` were removed from the lab. Do not use their old DNS names as the primary validation path.
-- From VPC-A, validate directly against:
-  - `B1` mgmt: `10.1.3.10`
-  - `C1` portal: `10.2.2.10`
-  - `C2` gateway: `10.2.3.10`
-  - `C3` controller: `10.2.4.10`
-- `D1` at `10.3.1.10` must remain unreachable from VPC-A.
-- The A2 diagnostic role does not include `ec2:SearchTransitGatewayRoutes`. If that command fails on A2, treat it as an IAM limitation, not automatic proof of a broken TGW route.
-
-## 2026-04-04 - PowerShell AWS CLI Lessons
-
-### Output Format
-Always use `--output json` and redirect to a file when output is complex
-such as NACLs, route tables, or security groups. The table format produces
-garbled ANSI output in PowerShell terminals.
-
-GOOD:
-```powershell
-aws ec2 describe-network-acls ... --output json > nacl.json
-```
-
-BAD:
-```powershell
-aws ec2 describe-network-acls ... --output table
-```
-
-### Boolean Filters in PowerShell
-JMESPath boolean filters with backticks fail in PowerShell.
-
-BROKEN:
-```powershell
---query "Items[?IsEgress==`false`]"
-```
-
-FIXED:
-- use `--output json` and read the file
-- or filter manually after capture
-
-### IAM Instance Profile for A2
-A2 requires an IAM instance profile for AWS CLI access.
-
-- Role: `lab-a2-diagnostic-role`
-- Profile: `lab-a2-diagnostic-profile`
-- Policies:
-  - `AmazonEC2ReadOnlyAccess`
-  - `ElasticLoadBalancingReadOnly`
-  - `AmazonS3ReadOnlyAccess`
-
-Attach via:
-```powershell
-aws ec2 associate-iam-instance-profile
-```
-
-### trust.json for IAM Role Creation
-PowerShell mangles inline JSON for `assume-role-policy-document`.
-Always write to a file first:
-
-```powershell
-'{"Version":"2012-10-17",...}' | Out-File -Encoding ascii trust.json
-aws iam create-role --assume-role-policy-document file://trust.json
-```
+| Route table by tag | `Name=tag:Name,Values=lab-rt-*` |
+| NACL by tag | `Name=tag:Name,Values=nacl-*` |
