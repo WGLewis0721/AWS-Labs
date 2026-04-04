@@ -58,16 +58,6 @@ output "alb_dns_name" {
   value       = module.network.alb_dns_name
 }
 
-output "nlb_b_dns_name" {
-  description = "DNS name of NLB-B (internal, Palo Alto trust)."
-  value       = module.network.nlb_b_dns_name
-}
-
-output "nlb_c_dns_name" {
-  description = "DNS name of NLB-C (internal, AppGate Portal)."
-  value       = module.network.nlb_c_dns_name
-}
-
 output "key_pair_name" {
   description = "EC2 key pair name used by the lab."
   value       = module.compute.key_pair_name
@@ -102,11 +92,13 @@ output "test_commands" {
   From A2 — Management path:
   ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.3.10   # Palo MGMT — MUST WORK
   curl -sk -o /dev/null -w "%%{http_code}" https://10.1.3.10       # Palo MGMT HTTPS
-  curl -s  -o /dev/null -w "%%{http_code}" http://${module.network.nlb_b_dns_name}   # NLB-B HTTP — MUST WORK
-  curl -sk -o /dev/null -w "%%{http_code}" https://${module.network.nlb_b_dns_name}  # NLB-B HTTPS
-  curl -sk -o /dev/null -w "%%{http_code}" https://${module.network.nlb_c_dns_name}  # NLB-C — MUST WORK
-  curl -sk -o /dev/null -w "%%{http_code}" https://10.2.4.10:8443  # Controller admin — MUST WORK
+  ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.2.10   # c1-portal — MUST WORK
+  curl -s  -o /dev/null -w "%%{http_code}" http://10.2.2.10        # c1-portal HTTP — MUST WORK
+  curl -sk -o /dev/null -w "%%{http_code}" https://10.2.2.10       # c1-portal HTTPS — MUST WORK
   curl -sk -o /dev/null -w "%%{http_code}" https://10.2.3.10       # Gateway — MUST WORK
+  ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.3.10   # Gateway SSH — MUST WORK
+  curl -sk -o /dev/null -w "%%{http_code}" https://10.2.4.10       # Controller HTTPS — MUST WORK
+  ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.4.10   # Controller SSH — MUST WORK
   curl -s  --connect-timeout 5 -o /dev/null -w "%%{http_code}" http://10.3.1.10  # D1 — MUST FAIL
 
   From B1 MGMT ENI (SSH: A2 → 10.1.3.10) — centralized egress test:
@@ -115,14 +107,8 @@ output "test_commands" {
 
   From c1-portal (SSH: A2 → 10.2.2.10):
   curl -sk -o /dev/null -w "%%{http_code}" https://10.2.3.10       # Gateway — MUST WORK
-  curl -sk -o /dev/null -w "%%{http_code}" https://10.2.4.10:8443  # Controller — MUST WORK
+  curl -sk -o /dev/null -w "%%{http_code}" https://10.2.4.10       # Controller — MUST WORK
   curl -s  --connect-timeout 10 https://checkip.amazonaws.com      # NAT GW egress
-
-  From D1 (SSH: A2 → B1 TRUST 10.1.2.10 → D1 10.3.1.10):
-  curl -sk -o /dev/null -w "%%{http_code}" https://${module.network.nlb_c_dns_name}  # Portal — MUST WORK
-  curl -s  -o /dev/null -w "%%{http_code}" http://${module.network.nlb_b_dns_name}   # Palo — MUST WORK
-  curl -sk --connect-timeout 5 https://10.2.4.10:8443              # Controller — MUST FAIL
-  curl -s  --connect-timeout 5 http://10.0.1.10                    # VPC-A — MUST FAIL
 
 Customer entry load balancer (internet-facing):
 curl -sk -o /dev/null -w "%%{http_code}" https://${module.network.alb_dns_name}

@@ -103,6 +103,9 @@ locals {
     # Inbound
     { acl = "a", egress = false, rule_number = 100, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 3389, to_port = 3389 },
     { acl = "a", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 22, to_port = 22 },
+    { acl = "a", egress = false, rule_number = 111, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 80, to_port = 80 },
+    { acl = "a", egress = false, rule_number = 112, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
+    { acl = "a", egress = false, rule_number = 113, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 8443, to_port = 8443 },
     { acl = "a", egress = false, rule_number = 120, protocol = "tcp", cidr_block = "10.1.0.0/16", from_port = 1024, to_port = 65535 },
     { acl = "a", egress = false, rule_number = 130, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 1024, to_port = 65535 },
     { acl = "a", egress = false, rule_number = 140, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
@@ -111,8 +114,10 @@ locals {
     { acl = "a", egress = true, rule_number = 100, protocol = "tcp", cidr_block = "10.1.0.0/16", from_port = 22, to_port = 22 },
     { acl = "a", egress = true, rule_number = 110, protocol = "tcp", cidr_block = "10.1.0.0/16", from_port = 80, to_port = 80 },
     { acl = "a", egress = true, rule_number = 111, protocol = "tcp", cidr_block = "10.1.0.0/16", from_port = 443, to_port = 443 },
+    { acl = "a", egress = true, rule_number = 119, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 22, to_port = 22 },
     { acl = "a", egress = true, rule_number = 120, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 443, to_port = 443 },
     { acl = "a", egress = true, rule_number = 121, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 8443, to_port = 8443 },
+    { acl = "a", egress = true, rule_number = 125, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 80, to_port = 80 },
     { acl = "a", egress = true, rule_number = 130, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 80, to_port = 80 },
     { acl = "a", egress = true, rule_number = 131, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 443, to_port = 443 },
     { acl = "a", egress = true, rule_number = 140, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
@@ -137,11 +142,16 @@ locals {
 
     # ── nacl "b_trust" (subnet-b-trust) ─────────────────────────────────
     # Inbound
+    { acl = "b_trust", egress = false, rule_number = 90, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 22, to_port = 22 },
+    { acl = "b_trust", egress = false, rule_number = 91, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
     { acl = "b_trust", egress = false, rule_number = 100, protocol = "tcp", cidr_block = "10.1.1.0/24", from_port = 1024, to_port = 65535 },
+    { acl = "b_trust", egress = false, rule_number = 101, protocol = "tcp", cidr_block = "10.1.3.0/24", from_port = 1024, to_port = 65535 },
     { acl = "b_trust", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 1024, to_port = 65535 },
     { acl = "b_trust", egress = false, rule_number = 120, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 1024, to_port = 65535 },
     { acl = "b_trust", egress = false, rule_number = 130, protocol = "icmp", cidr_block = "10.0.0.0/8", from_port = -1, to_port = -1 },
     # Outbound
+    { acl = "b_trust", egress = true, rule_number = 90, protocol = "tcp", cidr_block = "10.1.3.0/24", from_port = 22, to_port = 22 },
+    { acl = "b_trust", egress = true, rule_number = 91, protocol = "tcp", cidr_block = "10.1.3.0/24", from_port = 443, to_port = 443 },
     { acl = "b_trust", egress = true, rule_number = 100, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 443, to_port = 443 },
     { acl = "b_trust", egress = true, rule_number = 110, protocol = "tcp", cidr_block = "10.1.1.0/24", from_port = 1024, to_port = 65535 },
     { acl = "b_trust", egress = true, rule_number = 120, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 1024, to_port = 65535 },
@@ -163,10 +173,19 @@ locals {
     { acl = "c_dmz", egress = false, rule_number = 100, protocol = "tcp", cidr_block = "10.1.2.0/24", from_port = 443, to_port = 443 },
     { acl = "c_dmz", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
     { acl = "c_dmz", egress = false, rule_number = 111, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 8443, to_port = 8443 },
+    { acl = "c_dmz", egress = false, rule_number = 112, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 22, to_port = 22 },
     { acl = "c_dmz", egress = false, rule_number = 120, protocol = "tcp", cidr_block = "10.2.2.0/24", from_port = 1024, to_port = 65535 },
+    { acl = "c_dmz", egress = false, rule_number = 121, protocol = "tcp", cidr_block = "10.2.3.0/24", from_port = 1024, to_port = 65535 },
+    { acl = "c_dmz", egress = false, rule_number = 122, protocol = "tcp", cidr_block = "10.2.4.0/24", from_port = 1024, to_port = 65535 },
     { acl = "c_dmz", egress = false, rule_number = 130, protocol = "icmp", cidr_block = "10.0.0.0/8", from_port = -1, to_port = -1 },
     # Outbound
+    { acl = "c_dmz", egress = true, rule_number = 95, protocol = "tcp", cidr_block = "10.2.2.0/24", from_port = 22, to_port = 22 },
+    { acl = "c_dmz", egress = true, rule_number = 96, protocol = "tcp", cidr_block = "10.2.2.0/24", from_port = 80, to_port = 80 },
     { acl = "c_dmz", egress = true, rule_number = 100, protocol = "tcp", cidr_block = "10.2.2.0/24", from_port = 443, to_port = 443 },
+    { acl = "c_dmz", egress = true, rule_number = 101, protocol = "tcp", cidr_block = "10.2.3.0/24", from_port = 22, to_port = 22 },
+    { acl = "c_dmz", egress = true, rule_number = 102, protocol = "tcp", cidr_block = "10.2.3.0/24", from_port = 443, to_port = 443 },
+    { acl = "c_dmz", egress = true, rule_number = 103, protocol = "tcp", cidr_block = "10.2.4.0/24", from_port = 22, to_port = 22 },
+    { acl = "c_dmz", egress = true, rule_number = 104, protocol = "tcp", cidr_block = "10.2.4.0/24", from_port = 443, to_port = 443 },
     { acl = "c_dmz", egress = true, rule_number = 110, protocol = "tcp", cidr_block = "10.1.2.0/24", from_port = 1024, to_port = 65535 },
     { acl = "c_dmz", egress = true, rule_number = 120, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 1024, to_port = 65535 },
     { acl = "c_dmz", egress = true, rule_number = 130, protocol = "icmp", cidr_block = "10.0.0.0/8", from_port = -1, to_port = -1 },
@@ -176,6 +195,8 @@ locals {
     { acl = "c_portal", egress = false, rule_number = 100, protocol = "tcp", cidr_block = "10.2.1.0/24", from_port = 443, to_port = 443 },
     { acl = "c_portal", egress = false, rule_number = 101, protocol = "tcp", cidr_block = "10.2.1.0/24", from_port = 80, to_port = 80 },
     { acl = "c_portal", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 8443, to_port = 8443 },
+    { acl = "c_portal", egress = false, rule_number = 111, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
+    { acl = "c_portal", egress = false, rule_number = 112, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 22, to_port = 22 },
     { acl = "c_portal", egress = false, rule_number = 120, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
     { acl = "c_portal", egress = false, rule_number = 130, protocol = "icmp", cidr_block = "10.0.0.0/8", from_port = -1, to_port = -1 },
     # Outbound
@@ -190,6 +211,7 @@ locals {
     { acl = "c_gateway", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 8443, to_port = 8443 },
     { acl = "c_gateway", egress = false, rule_number = 111, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 444, to_port = 444 },
     { acl = "c_gateway", egress = false, rule_number = 112, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 22, to_port = 22 },
+    { acl = "c_gateway", egress = false, rule_number = 113, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
     { acl = "c_gateway", egress = false, rule_number = 120, protocol = "tcp", cidr_block = "10.2.4.0/24", from_port = 0, to_port = 65535 },
     { acl = "c_gateway", egress = false, rule_number = 130, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
     { acl = "c_gateway", egress = false, rule_number = 140, protocol = "icmp", cidr_block = "10.0.0.0/8", from_port = -1, to_port = -1 },
@@ -206,6 +228,7 @@ locals {
     { acl = "c_controller", egress = false, rule_number = 100, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 8443, to_port = 8443 },
     { acl = "c_controller", egress = false, rule_number = 101, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 444, to_port = 444 },
     { acl = "c_controller", egress = false, rule_number = 102, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 22, to_port = 22 },
+    { acl = "c_controller", egress = false, rule_number = 103, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
     { acl = "c_controller", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "10.2.2.0/24", from_port = 444, to_port = 444 },
     { acl = "c_controller", egress = false, rule_number = 111, protocol = "tcp", cidr_block = "10.2.2.0/24", from_port = 8443, to_port = 8443 },
     { acl = "c_controller", egress = false, rule_number = 120, protocol = "tcp", cidr_block = "10.2.3.0/24", from_port = 444, to_port = 444 },
@@ -576,133 +599,5 @@ resource "aws_lb_listener" "alb_https" {
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.alb.arn
-  }
-}
-
-# ============================================================
-# NLB-B (internal, VPC-B — Palo Alto trust interface)
-# ============================================================
-
-resource "aws_lb" "nlb_b" {
-  name               = "lab-nlb-b-palo-trust"
-  internal           = true
-  load_balancer_type = "network"
-  subnets            = [aws_subnet.this["b_untrust"].id]
-  tags               = merge(var.tags, { Name = "lab-nlb-b-palo-trust" })
-}
-
-resource "aws_lb_target_group" "nlb_b_80" {
-  name        = "lab-nlb-b-palo-trust-80"
-  port        = 80
-  protocol    = "TCP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.this["b"].id
-  tags        = merge(var.tags, { Name = "lab-nlb-b-palo-trust-80" })
-}
-
-resource "aws_lb_target_group_attachment" "nlb_b_80" {
-  target_group_arn = aws_lb_target_group.nlb_b_80.arn
-  target_id        = "10.1.2.10"
-  port             = 80
-}
-
-resource "aws_lb_target_group" "nlb_b_443" {
-  name        = "lab-nlb-b-palo-trust-443"
-  port        = 443
-  protocol    = "TCP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.this["b"].id
-  tags        = merge(var.tags, { Name = "lab-nlb-b-palo-trust-443" })
-}
-
-resource "aws_lb_target_group_attachment" "nlb_b_443" {
-  target_group_arn = aws_lb_target_group.nlb_b_443.arn
-  target_id        = "10.1.2.10"
-  port             = 443
-}
-
-resource "aws_lb_listener" "nlb_b_80" {
-  load_balancer_arn = aws_lb.nlb_b.arn
-  port              = 80
-  protocol          = "TCP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.nlb_b_80.arn
-  }
-}
-
-resource "aws_lb_listener" "nlb_b_443" {
-  load_balancer_arn = aws_lb.nlb_b.arn
-  port              = 443
-  protocol          = "TCP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.nlb_b_443.arn
-  }
-}
-
-# ============================================================
-# NLB-C (internal, VPC-C — AppGate portal)
-# ============================================================
-
-resource "aws_lb" "nlb_c" {
-  name               = "lab-nlb-c-appgate-portal"
-  internal           = true
-  load_balancer_type = "network"
-  subnets            = [aws_subnet.this["c_dmz"].id]
-  tags               = merge(var.tags, { Name = "lab-nlb-c-appgate-portal" })
-}
-
-resource "aws_lb_target_group" "nlb_c_80" {
-  name        = "lab-nlb-c-appgate-portal-80"
-  port        = 80
-  protocol    = "TCP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.this["c"].id
-  tags        = merge(var.tags, { Name = "lab-nlb-c-appgate-portal-80" })
-}
-
-resource "aws_lb_target_group_attachment" "nlb_c_80" {
-  target_group_arn = aws_lb_target_group.nlb_c_80.arn
-  target_id        = "10.2.2.10"
-  port             = 80
-}
-
-resource "aws_lb_target_group" "nlb_c_443" {
-  name        = "lab-nlb-c-appgate-portal-443"
-  port        = 443
-  protocol    = "TCP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.this["c"].id
-  tags        = merge(var.tags, { Name = "lab-nlb-c-appgate-portal-443" })
-}
-
-resource "aws_lb_target_group_attachment" "nlb_c_443" {
-  target_group_arn = aws_lb_target_group.nlb_c_443.arn
-  target_id        = "10.2.2.10"
-  port             = 443
-}
-
-resource "aws_lb_listener" "nlb_c_80" {
-  load_balancer_arn = aws_lb.nlb_c.arn
-  port              = 80
-  protocol          = "TCP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.nlb_c_80.arn
-  }
-}
-
-resource "aws_lb_listener" "nlb_c_443" {
-  load_balancer_arn = aws_lb.nlb_c.arn
-  port              = 443
-  protocol          = "TCP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.nlb_c_443.arn
   }
 }

@@ -199,63 +199,177 @@ locals {
   chown ec2-user:ec2-user /home/ec2-user/lab-notes.txt
   BASH
 
+  b1_post_boot = <<-BASH
+  cat > /usr/local/bin/lab-configure-multi-eni.sh <<'SCRIPT'
+  #!/bin/bash
+  set -euxo pipefail
+
+  ensure_table() {
+    local id="$1"
+    local name="$2"
+    grep -qE "^$${id}[[:space:]]+$${name}$" /etc/iproute2/rt_tables || echo "$${id} $${name}" >> /etc/iproute2/rt_tables
+  }
+
+  ensure_table 101 palo-untrust
+  ensure_table 102 palo-trust
+  ensure_table 103 palo-mgmt
+
+  sysctl -w net.ipv4.conf.all.rp_filter=0
+  sysctl -w net.ipv4.conf.default.rp_filter=0
+  sysctl -w net.ipv4.conf.ens5.rp_filter=0
+  sysctl -w net.ipv4.conf.ens6.rp_filter=0
+  sysctl -w net.ipv4.conf.ens7.rp_filter=0
+
+  ip route flush table 101 || true
+  ip route flush table 102 || true
+  ip route flush table 103 || true
+
+  ip route replace 10.1.1.0/24 dev ens5 src 10.1.1.10 table 101
+  ip route replace default via 10.1.1.1 dev ens5 table 101
+  ip route replace 10.1.2.0/24 dev ens6 src 10.1.2.10 table 102
+  ip route replace default via 10.1.2.1 dev ens6 table 102
+  ip route replace 10.1.3.0/24 dev ens7 src 10.1.3.10 table 103
+  ip route replace default via 10.1.3.1 dev ens7 table 103
+
+  ip rule del from 10.1.1.10/32 table 101 priority 100 2>/dev/null || true
+  ip rule del from 10.1.2.10/32 table 102 priority 101 2>/dev/null || true
+  ip rule del from 10.1.3.10/32 table 103 priority 102 2>/dev/null || true
+
+  ip rule add from 10.1.1.10/32 table 101 priority 100
+  ip rule add from 10.1.2.10/32 table 102 priority 101
+  ip rule add from 10.1.3.10/32 table 103 priority 102
+
+  ip route flush cache
+  SCRIPT
+  chmod +x /usr/local/bin/lab-configure-multi-eni.sh
+
+  cat > /etc/systemd/system/lab-multi-eni.service <<'SERVICE'
+  [Unit]
+  Description=Configure source-based routing for the Palo multi-ENI host
+  After=network-online.target
+  Wants=network-online.target
+
+  [Service]
+  Type=oneshot
+  ExecStart=/usr/local/bin/lab-configure-multi-eni.sh
+  RemainAfterExit=yes
+
+  [Install]
+  WantedBy=multi-user.target
+  SERVICE
+
+  systemctl daemon-reload
+  systemctl enable --now lab-multi-eni.service
+  BASH
+
   # ---------------------------------------------------------------------------
-  # User-data: nginx + HTTPS template (B1, C1-portal, C2-gateway, C3-controller)
+  # User-data: self-contained HTTP + HTTPS template
+  # Avoid package-manager dependencies so the landing pages still come up
+  # before centralized egress is fully validated.
   # ---------------------------------------------------------------------------
 
-  nginx_userdata_template = <<-EOT
+  web_userdata_template = <<-EOT
   #!/bin/bash
   set -euxo pipefail
   hostnamectl set-hostname $${HOSTNAME}
-  dnf install -y nginx
-  mkdir -p /etc/nginx/ssl
+  mkdir -p /opt/lab-web
   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout /etc/nginx/ssl/self.key \
-    -out /etc/nginx/ssl/self.crt \
+    -keyout /opt/lab-web/self.key \
+    -out /opt/lab-web/self.crt \
     -subj "/CN=lab.internal/O=TGW Lab"
-  mkdir -p /var/www/html
-  cat > /var/www/html/index.html <<'HTML'
+  cat > /opt/lab-web/index.html <<'HTML'
   $${HTML}
   HTML
-  cat > /etc/nginx/conf.d/lab.conf <<'NGINX'
-  server {
-      listen 80;
-      root /var/www/html;
-      index index.html;
-  }
-  server {
-      listen 443 ssl;
-      ssl_certificate /etc/nginx/ssl/self.crt;
-      ssl_certificate_key /etc/nginx/ssl/self.key;
-      root /var/www/html;
-      index index.html;
-  }
-  NGINX
-  systemctl enable --now nginx
+  cat > /opt/lab-web/server.py <<'PY'
+  import http.server
+  import os
+  import socketserver
+  import ssl
+  import threading
+
+  os.chdir("/opt/lab-web")
+
+  class ReusableTCPServer(socketserver.TCPServer):
+      allow_reuse_address = True
+
+  class Handler(http.server.SimpleHTTPRequestHandler):
+      def log_message(self, fmt, *args):
+          return
+
+  def serve_http():
+      with ReusableTCPServer(("0.0.0.0", 80), Handler) as httpd:
+          httpd.serve_forever()
+
+  def serve_https():
+      with ReusableTCPServer(("0.0.0.0", 443), Handler) as httpd:
+          context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+          context.load_cert_chain("/opt/lab-web/self.crt", "/opt/lab-web/self.key")
+          httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+          httpd.serve_forever()
+
+  threading.Thread(target=serve_http, daemon=True).start()
+  serve_https()
+  PY
+  cat > /etc/systemd/system/lab-web.service <<'SERVICE'
+  [Unit]
+  Description=TGW Lab static HTTP/HTTPS landing page
+  After=network-online.target
+  Wants=network-online.target
+
+  [Service]
+  Type=simple
+  ExecStart=/usr/bin/python3 /opt/lab-web/server.py
+  Restart=always
+  RestartSec=5
+  WorkingDirectory=/opt/lab-web
+
+  [Install]
+  WantedBy=multi-user.target
+  SERVICE
+  systemctl daemon-reload
+  systemctl enable --now sshd
+  systemctl enable --now lab-web.service
+  $${POST_BOOT}
   EOT
 
   b1_userdata = replace(
-    replace(local.nginx_userdata_template, "$${HOSTNAME}", "b1-paloalto"),
-    "$${HTML}",
-    trimspace(local.b1_html)
+    replace(
+      replace(local.web_userdata_template, "$${HOSTNAME}", "b1-paloalto"),
+      "$${HTML}",
+      trimspace(local.b1_html)
+    ),
+    "$${POST_BOOT}",
+    trimspace(local.b1_post_boot)
   )
 
   c1_portal_userdata = replace(
-    replace(local.nginx_userdata_template, "$${HOSTNAME}", "c1-portal"),
-    "$${HTML}",
-    trimspace(local.c1_portal_html)
+    replace(
+      replace(local.web_userdata_template, "$${HOSTNAME}", "c1-portal"),
+      "$${HTML}",
+      trimspace(local.c1_portal_html)
+    ),
+    "$${POST_BOOT}",
+    ""
   )
 
   c2_gateway_userdata = replace(
-    replace(local.nginx_userdata_template, "$${HOSTNAME}", "c2-gateway"),
-    "$${HTML}",
-    trimspace(local.c2_gateway_html)
+    replace(
+      replace(local.web_userdata_template, "$${HOSTNAME}", "c2-gateway"),
+      "$${HTML}",
+      trimspace(local.c2_gateway_html)
+    ),
+    "$${POST_BOOT}",
+    ""
   )
 
   c3_controller_userdata = replace(
-    replace(local.nginx_userdata_template, "$${HOSTNAME}", "c3-controller"),
-    "$${HTML}",
-    trimspace(local.c3_controller_html)
+    replace(
+      replace(local.web_userdata_template, "$${HOSTNAME}", "c3-controller"),
+      "$${HTML}",
+      trimspace(local.c3_controller_html)
+    ),
+    "$${POST_BOOT}",
+    ""
   )
 
   # ---------------------------------------------------------------------------

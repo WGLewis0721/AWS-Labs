@@ -10,7 +10,7 @@ It builds:
 
 - 4 VPCs with 1 subnet each
 - 2 Transit Gateways with separate route tables
-- 5 EC2 instances that represent the lab roles
+- 7 EC2 instances that represent the lab roles
 - custom VPC route tables
 - custom network ACLs
 - custom security groups
@@ -55,6 +55,7 @@ This lab is designed around bastion-style access, not direct exposure of every w
 - Your laptop connects to `A1` over RDP for manual browser checks.
 - Your laptop connects to `A2` over SSH for terminal-based administration and validation.
 - `A1` and `A2` can reach `B1` and `C1`.
+- Internal validation in `VPC-B` and `VPC-C` uses the private instance IPs directly. The lab does not depend on internal NLBs.
 - `B1` and `C1` sit on both transit domains and represent shared service or inspection tiers.
 - The validated administrative path to `D1` is through `B1`.
 - `VPC-A` does not have a direct allowed path to `VPC-D`.
@@ -71,15 +72,17 @@ In other words, the environment is meant to behave like a real segmented network
 | --- | --- | --- | --- | --- |
 | A1 | VPC-A | `10.0.1.10` | yes, assigned at apply time | Windows bastion for RDP and Chrome-based checks |
 | A2 | VPC-A | `10.0.1.20` | yes, assigned at apply time | Linux bastion for SSH and CLI validation |
-| B1 | VPC-B | `10.1.1.10` | no | Palo Alto simulation host with SSH and HTTP service |
-| C1 | VPC-C | `10.2.1.10` | no | AppGate simulation host with SSH and HTTP service |
+| B1 | VPC-B | `10.1.3.10` management, `10.1.2.10` trust, `10.1.1.10` untrust | public EIP on `10.1.1.10` | Palo Alto simulation host with a dedicated management interface |
+| C1 | VPC-C | `10.2.2.10` | no | AppGate portal simulation host with SSH and HTTPS management from VPC-A |
+| C2 | VPC-C | `10.2.3.10` | no | AppGate gateway simulation host with SSH and HTTPS management from VPC-A |
+| C3 | VPC-C | `10.2.4.10` | no | AppGate controller simulation host with SSH and HTTPS management from VPC-A |
 | D1 | VPC-D | `10.3.1.10` | no | customer test client used to prove segmentation |
 
 The instance roles are intentionally simple:
 
 - `A1` installs Google Chrome and is used for manual HTTP validation.
 - `A2` is the operator jump box.
-- `B1` and `C1` each run a lightweight static web service on port `80`.
+- `B1`, `C1`, `C2`, and `C3` run lightweight static web services with HTTPS enabled for operator validation.
 - `D1` is a Linux test host with no public IP.
 
 ## Transit gateways and routing
@@ -104,21 +107,18 @@ These are the intended outcomes for the deployed lab:
 | Source | Destination | Protocol | Expected result |
 | --- | --- | --- | --- |
 | A2 | B1 | SSH | allowed |
-| A2 | C1 | SSH | allowed |
+| A2 | C1/C2/C3 | SSH | allowed |
 | A2 | D1 | SSH | blocked |
-| A2 | B1 | HTTP | allowed |
-| A2 | C1 | HTTP | allowed |
-| A2 | D1 | HTTP | blocked |
-| A2 | B1/C1 | ICMP | allowed |
+| A2 | B1 | HTTPS | allowed |
+| A2 | C1/C2/C3 | HTTPS | allowed |
+| A2 | D1 | HTTPS | blocked |
+| A2 | B1/C1/C2/C3 | ICMP | allowed |
 | A2 | D1 | ICMP | blocked |
 | B1 | D1 | SSH | allowed |
 | B1 | D1 | ICMP | allowed |
-| D1 | B1 | HTTP | allowed |
-| D1 | C1 | HTTP | allowed |
-| D1 | A2 | HTTP | blocked |
-| A1 Chrome | B1 | HTTP | allowed |
-| A1 Chrome | C1 | HTTP | allowed |
-| A1 Chrome | D1 | HTTP | blocked |
+| A1 Chrome | B1 | HTTPS | allowed |
+| A1 Chrome | C1/C2/C3 | HTTPS | allowed |
+| A1 Chrome | D1 | HTTPS | blocked |
 
 ## Repository structure
 
@@ -228,14 +228,18 @@ terraform output -raw rdp_password_decrypt_command
 4. Launch Chrome on `A1`.
 5. Browse to:
 
-- `http://10.1.1.10`
-- `http://10.2.1.10`
-- `http://10.3.1.10`
+- `https://10.1.3.10`
+- `https://10.2.2.10`
+- `https://10.2.3.10`
+- `https://10.2.4.10`
+- `https://10.3.1.10`
+
+These direct private-IP targets replace the older internal NLB checks.
 
 Expected behavior:
 
-- `B1` loads
-- `C1` loads
+- `B1` loads after a certificate warning
+- `C1`, `C2`, and `C3` load after certificate warnings
 - `D1` does not load
 
 ### A2 Linux bastion
@@ -252,21 +256,27 @@ ssh -i tgw-lab-key.pem ec2-user@$(terraform output -raw a2_linux_public_ip)
 If you want to SSH onward from inside `A2`, make sure your key is available there through agent forwarding or by temporarily placing the PEM on the host. Once connected, validate the main paths:
 
 ```bash
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.1.10
-ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.1.10
+ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.1.3.10
+ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.2.10
+ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.3.10
+ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.2.4.10
 ssh -o ConnectTimeout=5 -i tgw-lab-key.pem ec2-user@10.3.1.10
-curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://10.1.1.10
-curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://10.2.1.10
+curl -sk --connect-timeout 5 -o /dev/null -w "%{http_code}" https://10.1.3.10
+curl -sk --connect-timeout 5 -o /dev/null -w "%{http_code}" https://10.2.2.10
+curl -sk --connect-timeout 5 -o /dev/null -w "%{http_code}" https://10.2.3.10
+curl -sk --connect-timeout 5 -o /dev/null -w "%{http_code}" https://10.2.4.10
 curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://10.3.1.10
-ping -c 3 10.1.1.10
-ping -c 3 10.2.1.10
+ping -c 3 10.1.3.10
+ping -c 3 10.2.2.10
+ping -c 3 10.2.3.10
+ping -c 3 10.2.4.10
 ping -c 3 10.3.1.10
 ```
 
 Expected behavior:
 
-- SSH, HTTP, and ping to `B1` succeed
-- SSH, HTTP, and ping to `C1` succeed
+- SSH, HTTPS, and ping to `B1` succeed
+- SSH, HTTPS, and ping to `C1`, `C2`, and `C3` succeed
 - SSH, HTTP, and ping to `D1` fail from `A2`
 
 ## End-to-end operator model

@@ -57,13 +57,3 @@ output "alb_dns_name" {
   description = "DNS name of the internet-facing customer-entry load balancer."
   value       = aws_lb.alb.dns_name
 }
-
-output "nlb_b_dns_name" {
-  description = "DNS name of the internal NLB in VPC-B (Palo Alto trust)."
-  value       = aws_lb.nlb_b.dns_name
-}
-
-output "nlb_c_dns_name" {
-  description = "DNS name of the internal NLB in VPC-C (AppGate portal)."
-  value       = aws_lb.nlb_c.dns_name
-}
