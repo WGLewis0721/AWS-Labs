@@ -20,6 +20,7 @@ module "security" {
 module "compute" {
   source = "../../modules/compute"
 
+  instance_ami_ids   = var.instance_ami_ids
   name_prefix        = local.name_prefix
   public_key         = var.public_key
   security_group_ids = module.security.security_group_ids

@@ -5,6 +5,10 @@ used during deployment, validation, and troubleshooting.
 
 ## Scripts
 
+- `deploy.ps1`
+  - Canonical local staged deployment entrypoint for the lab.
+  - Seeds bootstrap assets to S3, ensures golden AMIs exist, runs phased Terraform applies, reattaches diagnostic IAM profiles, bootstraps nginx through A2, and runs SSM netchecks.
+
 - `netcheck.sh`
   - Canonical A2 validation script for the simplified direct-access lab.
   - Validates A2 -> B1/C1/C2/C3 and confirms A2 -X-> D1 isolation.
@@ -22,6 +26,15 @@ used during deployment, validation, and troubleshooting.
 
 - `iam-role-fix.sh`
   - Historical IAM helper for the A2 diagnostic role.
+
+- `seed-nginx-bundle-a2.sh`
+  - Runs on A2 to download the AL2023 nginx RPM bundle from the internet and package it for S3 upload.
+
+- `nginx-bootstrap-node.sh`
+  - Runs on B1/C1/C2/C3 to install nginx from a local RPM bundle and replace the old Python placeholder service.
+
+- `bootstrap-nginx-via-a2.sh`
+  - Runs on A2 to pull the nginx bundle from S3 and fan out the bootstrap to the private Linux nodes.
 
 - `ssm-netcheck-a1.yml`
   - SSM Command document template that runs the A1 PowerShell netcheck script.

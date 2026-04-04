@@ -405,13 +405,23 @@ locals {
     ""
   )
 
+  resolved_ami_ids = {
+    a1            = lookup(var.instance_ami_ids, "a1", data.aws_ami.windows_2022.id)
+    a2            = lookup(var.instance_ami_ids, "a2", data.aws_ami.al2023.id)
+    b1            = lookup(var.instance_ami_ids, "b1", data.aws_ami.al2023.id)
+    c1_portal     = lookup(var.instance_ami_ids, "c1_portal", data.aws_ami.al2023.id)
+    c2_gateway    = lookup(var.instance_ami_ids, "c2_gateway", data.aws_ami.al2023.id)
+    c3_controller = lookup(var.instance_ami_ids, "c3_controller", data.aws_ami.al2023.id)
+    d1            = lookup(var.instance_ami_ids, "d1", data.aws_ami.al2023.id)
+  }
+
   # ---------------------------------------------------------------------------
   # Instance map — used by aws_instance.this (excludes B1)
   # ---------------------------------------------------------------------------
 
   instances = {
     a1 = {
-      ami_id        = data.aws_ami.windows_2022.id
+      ami_id        = local.resolved_ami_ids["a1"]
       instance_type = "t3.medium"
       name          = "lab-a1-windows"
       private_ip    = "10.0.1.10"
@@ -424,7 +434,7 @@ locals {
       windows       = true
     }
     a2 = {
-      ami_id        = data.aws_ami.al2023.id
+      ami_id        = local.resolved_ami_ids["a2"]
       instance_type = "t3.micro"
       name          = "lab-a2-linux"
       private_ip    = "10.0.1.20"
@@ -437,7 +447,7 @@ locals {
       windows       = false
     }
     c1_portal = {
-      ami_id        = data.aws_ami.al2023.id
+      ami_id        = local.resolved_ami_ids["c1_portal"]
       instance_type = "t3.micro"
       name          = "lab-c1-portal"
       private_ip    = "10.2.2.10"
@@ -450,7 +460,7 @@ locals {
       windows       = false
     }
     c2_gateway = {
-      ami_id        = data.aws_ami.al2023.id
+      ami_id        = local.resolved_ami_ids["c2_gateway"]
       instance_type = "t3.micro"
       name          = "lab-c2-gateway"
       private_ip    = "10.2.3.10"
@@ -463,7 +473,7 @@ locals {
       windows       = false
     }
     c3_controller = {
-      ami_id        = data.aws_ami.al2023.id
+      ami_id        = local.resolved_ami_ids["c3_controller"]
       instance_type = "t3.micro"
       name          = "lab-c3-controller"
       private_ip    = "10.2.4.10"
@@ -476,7 +486,7 @@ locals {
       windows       = false
     }
     d1 = {
-      ami_id        = data.aws_ami.al2023.id
+      ami_id        = local.resolved_ami_ids["d1"]
       instance_type = "t3.micro"
       name          = "lab-d1-customer"
       private_ip    = "10.3.1.10"
@@ -551,7 +561,7 @@ resource "aws_eip" "palo_untrust" {
 # ---------------------------------------------------------------------------
 
 resource "aws_instance" "b1" {
-  ami           = data.aws_ami.al2023.id
+  ami           = local.resolved_ami_ids["b1"]
   instance_type = "t3.medium" # larger than t3.micro to simulate realistic firewall resource allocation
   key_name      = aws_key_pair.lab.key_name
   user_data     = local.b1_userdata

@@ -13,6 +13,7 @@ tfplan
 
 # Ignore tfvars with secrets by default
 *.tfvars
+*.auto.tfvars.json
 !*.tfvars.example
 
 # Ignore local override files

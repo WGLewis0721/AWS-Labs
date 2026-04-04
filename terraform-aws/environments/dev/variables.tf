@@ -30,3 +30,9 @@ variable "common_tags" {
   description = "Common tags applied to all resources."
   default     = {}
 }
+
+variable "instance_ami_ids" {
+  type        = map(string)
+  description = "Optional AMI overrides keyed by lab node (a1, a2, b1, c1_portal, c2_gateway, c3_controller, d1)."
+  default     = {}
+}

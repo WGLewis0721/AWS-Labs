@@ -18,9 +18,14 @@ variable "subnet_ids" {
   description = "Subnet IDs keyed by lab segment."
 }
 
+variable "instance_ami_ids" {
+  type        = map(string)
+  description = "Optional AMI overrides keyed by lab node."
+  default     = {}
+}
+
 variable "tags" {
   type        = map(string)
   description = "Common tags applied to compute resources."
   default     = {}
 }
-
