@@ -1,0 +1,128 @@
+
+[1mTGW Segmentation Lab - Network Diagnostic Script[0m
+Running from: A2 Linux (10.0.1.20)
+Date: Sat Apr  4 06:36:35 UTC 2026
+Report: /tmp/netcheck-20260404-063635.txt
+[0;34m------------------------------------------------------------[0m
+
+[1m[0;36m============================================================[0m
+[1m[0;36m  SECTION 1 - A2 Self Check[0m
+[1m[0;36m============================================================[0m
+[1m[0;34m[CHECK][0m Checking A2 identity and routing table
+  [0;36mINFO[0m - A2 private IP: 10.0.1.20
+  [0;32mPASS[0m - Running on correct instance (A2 at 10.0.1.20)
+[1m[0;34m[CHECK][0m Checking local route table on A2
+default via 10.0.1.1 dev ens5 proto dhcp src 10.0.1.20 metric 512 
+10.0.0.2 via 10.0.1.1 dev ens5 proto dhcp src 10.0.1.20 metric 512 
+10.0.1.0/24 dev ens5 proto kernel scope link src 10.0.1.20 metric 512 
+10.0.1.1 dev ens5 proto dhcp scope link src 10.0.1.20 metric 512 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown 
+[0;34m------------------------------------------------------------[0m
+
+[1m[0;36m============================================================[0m
+[1m[0;36m  SECTION 2 - Internet Egress Context[0m
+[1m[0;36m============================================================[0m
+[1m[0;34m[CHECK][0m Testing outbound internet connectivity from A2
+  [0;32mPASS[0m - Internet reachable from A2 - observed public IP: 44.204.129.98
+  [0;36mINFO[0m - Shared NAT gateway EIP for private instances: 98.94.212.42
+  [0;36mINFO[0m - A2 is public, so its own egress IP differs from the shared NAT gateway
+[0;34m------------------------------------------------------------[0m
+
+[1m[0;36m============================================================[0m
+[1m[0;36m  SECTION 3 - VPC-B Management Path[0m
+[1m[0;36m============================================================[0m
+[1m[0;34m[CHECK][0m B1 Palo management interface (10.1.3.10)
+  [0;32mPASS[0m - B1 MGMT ping - ICMP to 10.1.3.10 reachable
+  [0;32mPASS[0m - B1 MGMT TCP 22 - TCP 10.1.3.10:22 is OPEN
+  [0;32mPASS[0m - B1 MGMT TCP 443 - TCP 10.1.3.10:443 is OPEN
+  [0;32mPASS[0m - B1 MGMT HTTPS - HTTP 200 from https://10.1.3.10
+  [0;32mPASS[0m - B1 MGMT SSH - hostname: b1-paloalto
+[0;34m------------------------------------------------------------[0m
+
+[1m[0;36m============================================================[0m
+[1m[0;36m  SECTION 4 - VPC-C Direct Private Reachability[0m
+[1m[0;36m============================================================[0m
+[1m[0;34m[CHECK][0m Direct connectivity to C1 Portal (10.2.2.10)
+  [0;32mPASS[0m - C1 Portal ping - ICMP to 10.2.2.10 reachable
+  [0;32mPASS[0m - C1 Portal TCP 22 - TCP 10.2.2.10:22 is OPEN
+  [0;32mPASS[0m - C1 Portal TCP 80 - TCP 10.2.2.10:80 is OPEN
+  [0;32mPASS[0m - C1 Portal TCP 443 - TCP 10.2.2.10:443 is OPEN
+  [0;32mPASS[0m - C1 Portal HTTP - HTTP 200 from http://10.2.2.10
+  [0;32mPASS[0m - C1 Portal HTTPS - HTTP 200 from https://10.2.2.10
+  [0;32mPASS[0m - C1 Portal SSH - hostname: c1-portal
+[0;34m------------------------------------------------------------[0m
+[1m[0;34m[CHECK][0m Direct connectivity to C2 Gateway (10.2.3.10)
+  [0;32mPASS[0m - C2 Gateway ping - ICMP to 10.2.3.10 reachable
+  [0;32mPASS[0m - C2 Gateway TCP 22 - TCP 10.2.3.10:22 is OPEN
+  [0;32mPASS[0m - C2 Gateway TCP 443 - TCP 10.2.3.10:443 is OPEN
+  [0;32mPASS[0m - C2 Gateway HTTPS - HTTP 200 from https://10.2.3.10
+  [0;32mPASS[0m - C2 Gateway SSH - hostname: c2-gateway
+[0;34m------------------------------------------------------------[0m
+[1m[0;34m[CHECK][0m Direct connectivity to C3 Controller (10.2.4.10)
+  [0;32mPASS[0m - C3 Controller ping - ICMP to 10.2.4.10 reachable
+  [0;32mPASS[0m - C3 Controller TCP 22 - TCP 10.2.4.10:22 is OPEN
+  [0;32mPASS[0m - C3 Controller TCP 443 - TCP 10.2.4.10:443 is OPEN
+  [0;32mPASS[0m - C3 Controller HTTPS - HTTP 200 from https://10.2.4.10
+  [0;32mPASS[0m - C3 Controller SSH - hostname: c3-controller
+[0;34m------------------------------------------------------------[0m
+[1m[0;34m[CHECK][0m SSH into C1 Portal to check nginx and private-instance egress
+active
+LISTEN 0      511          0.0.0.0:443        0.0.0.0:*   
+LISTEN 0      511          0.0.0.0:80         0.0.0.0:*   
+LISTEN 0      511             [::]:80            [::]:*   
+localhost_443=200
+localhost_80=200
+  [0;32mPASS[0m - nginx is active on C1
+  [0;32mPASS[0m - C1 serves HTTPS locally
+  [0;32mPASS[0m - C1 serves HTTP locally
+[0;34m------------------------------------------------------------[0m
+
+[1m[0;36m============================================================[0m
+[1m[0;36m  SECTION 5 - VPC-D Isolation[0m
+[1m[0;36m============================================================[0m
+[1m[0;34m[CHECK][0m Testing A2 to D1 connectivity (expected to fail)
+  [0;32mPASS[0m - Isolation confirmed - A2 cannot ping D1
+  [0;32mPASS[0m - Isolation confirmed - TCP 80 to D1 is blocked
+[0;34m------------------------------------------------------------[0m
+
+[1m[0;36m============================================================[0m
+[1m[0;36m  SECTION 6 - AWS CLI Sanity Checks[0m
+[1m[0;36m============================================================[0m
+[1m[0;34m[CHECK][0m Verifying internal NLBs are absent (expected after simplification)
+  [0;32mPASS[0m - No internal NLB-B or NLB-C load balancers exist
+[0;34m------------------------------------------------------------[0m
+[1m[0;34m[CHECK][0m Checking TGW1 route for 10.2.0.0/16
+  [0;36mINFO[0m - TGW1 route table: tgw-rtb-0b487c42bb70dda85
+  [1;33mWARN[0m - Could not verify TGW1 route from the A2 instance role
+  [0;36mINFO[0m - This role does not have ec2:SearchTransitGatewayRoutes in the current lab policy
+  [0;36mINFO[0m - Direct C-path success and the VPC-A route-table check already confirm working routing
+[0;34m------------------------------------------------------------[0m
+[1m[0;34m[CHECK][0m Checking VPC-A route table for 10.2.0.0/16
+  [0;36mINFO[0m - VPC-A ID: vpc-01f66f1e621915e6e
+  [0;32mPASS[0m - VPC-A route table has 10.2.0.0/16 routed to a transit gateway
+[0;34m------------------------------------------------------------[0m
+[1m[0;34m[CHECK][0m Checking critical VPC-A NACL rules for direct VPC-C access
+  [0;32mPASS[0m - VPC-A subnet NACL includes the direct-access rules (111/112/113/125)
+[0;34m------------------------------------------------------------[0m
+[1m[0;34m[CHECK][0m Checking c-dmz NACL rule allowing HTTP to c-portal
+  [0;32mPASS[0m - c-dmz NACL includes rule 96 for HTTP to c-portal
+[0;34m------------------------------------------------------------[0m
+
+[1m[0;36m============================================================[0m
+[1m[0;36m  SECTION 7 - Diagnostic Summary[0m
+[1m[0;36m============================================================[0m
+
+[1mFull report saved to: /tmp/netcheck-20260404-063635.txt[0m
+
+[1mExpected healthy outcomes for this simplified lab:[0m
+  - A2 confirms it is 10.0.1.20
+  - B1 management path works on 10.1.3.10 (SSH and HTTPS)
+  - C1 works on 10.2.2.10 (HTTP, HTTPS, SSH)
+  - C2 works on 10.2.3.10 (HTTPS, SSH)
+  - C3 works on 10.2.4.10 (HTTPS, SSH)
+  - D1 remains unreachable from A2
+  - No internal NLB-B or NLB-C load balancers remain
+
+[0;36mCopy report to your laptop:[0m
+  scp -i tgw-lab-key.pem ec2-user@<A2_IP>:/tmp/netcheck-20260404-063635.txt .
+

@@ -1,0 +1,652 @@
+﻿{
+    "NetworkAcls":  [
+                        {
+                            "Associations":  [
+                                                 {
+                                                     "NetworkAclAssociationId":  "aclassoc-09e66a5ac6f68657d",
+                                                     "NetworkAclId":  "acl-05413fc9ffa66da56",
+                                                     "SubnetId":  "subnet-041b33278017ca93a"
+                                                 }
+                                             ],
+                            "Entries":  [
+                                            {
+                                                "CidrBlock":  "10.1.0.0/16",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  22,
+                                                                  "To":  22
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  100
+                                            },
+                                            {
+                                                "CidrBlock":  "10.1.0.0/16",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  80,
+                                                                  "To":  80
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  110
+                                            },
+                                            {
+                                                "CidrBlock":  "10.1.0.0/16",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  111
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.0.0/16",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  22,
+                                                                  "To":  22
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  119
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.0.0/16",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  120
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.0.0/16",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  8443,
+                                                                  "To":  8443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  121
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  80,
+                                                                  "To":  80
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  130
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  131
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  140
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/8",
+                                                "Egress":  true,
+                                                "IcmpTypeCode":  {
+                                                                     "Code":  -1,
+                                                                     "Type":  -1
+                                                                 },
+                                                "Protocol":  "1",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  150
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  true,
+                                                "Protocol":  "-1",
+                                                "RuleAction":  "deny",
+                                                "RuleNumber":  32767
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  3389,
+                                                                  "To":  3389
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  100
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  22,
+                                                                  "To":  22
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  110
+                                            },
+                                            {
+                                                "CidrBlock":  "10.1.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  120
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  130
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  140
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/8",
+                                                "Egress":  false,
+                                                "IcmpTypeCode":  {
+                                                                     "Code":  -1,
+                                                                     "Type":  -1
+                                                                 },
+                                                "Protocol":  "1",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  150
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  false,
+                                                "Protocol":  "-1",
+                                                "RuleAction":  "deny",
+                                                "RuleNumber":  32767
+                                            }
+                                        ],
+                            "IsDefault":  false,
+                            "NetworkAclId":  "acl-05413fc9ffa66da56",
+                            "Tags":  [
+                                         {
+                                             "Key":  "ManagedBy",
+                                             "Value":  "terraform"
+                                         },
+                                         {
+                                             "Key":  "Project",
+                                             "Value":  "tgw-segmentation-lab"
+                                         },
+                                         {
+                                             "Key":  "Owner",
+                                             "Value":  "replace-me"
+                                         },
+                                         {
+                                             "Key":  "Environment",
+                                             "Value":  "dev"
+                                         },
+                                         {
+                                             "Key":  "Name",
+                                             "Value":  "nacl-a"
+                                         }
+                                     ],
+                            "VpcId":  "vpc-01f66f1e621915e6e",
+                            "OwnerId":  "394281571385"
+                        },
+                        {
+                            "Associations":  [
+                                                 {
+                                                     "NetworkAclAssociationId":  "aclassoc-0a7227668f3204ed5",
+                                                     "NetworkAclId":  "acl-088a6ca74ae648e4d",
+                                                     "SubnetId":  "subnet-0d7ac5e9cea6533f3"
+                                                 }
+                                             ],
+                            "Entries":  [
+                                            {
+                                                "CidrBlock":  "10.2.2.0/24",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  100
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.4.0/24",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  444,
+                                                                  "To":  444
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  110
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.4.0/24",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  8443,
+                                                                  "To":  8443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  111
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  120
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  130
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/8",
+                                                "Egress":  true,
+                                                "IcmpTypeCode":  {
+                                                                     "Code":  -1,
+                                                                     "Type":  -1
+                                                                 },
+                                                "Protocol":  "1",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  140
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  true,
+                                                "Protocol":  "-1",
+                                                "RuleAction":  "deny",
+                                                "RuleNumber":  32767
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.2.0/24",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  100
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  8443,
+                                                                  "To":  8443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  110
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  444,
+                                                                  "To":  444
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  111
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  22,
+                                                                  "To":  22
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  112
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  113
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.4.0/24",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  0,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  120
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  130
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/8",
+                                                "Egress":  false,
+                                                "IcmpTypeCode":  {
+                                                                     "Code":  -1,
+                                                                     "Type":  -1
+                                                                 },
+                                                "Protocol":  "1",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  140
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  false,
+                                                "Protocol":  "-1",
+                                                "RuleAction":  "deny",
+                                                "RuleNumber":  32767
+                                            }
+                                        ],
+                            "IsDefault":  false,
+                            "NetworkAclId":  "acl-088a6ca74ae648e4d",
+                            "Tags":  [
+                                         {
+                                             "Key":  "Name",
+                                             "Value":  "nacl-c-gateway"
+                                         },
+                                         {
+                                             "Key":  "Owner",
+                                             "Value":  "replace-me"
+                                         },
+                                         {
+                                             "Key":  "Project",
+                                             "Value":  "tgw-segmentation-lab"
+                                         },
+                                         {
+                                             "Key":  "ManagedBy",
+                                             "Value":  "terraform"
+                                         },
+                                         {
+                                             "Key":  "Environment",
+                                             "Value":  "dev"
+                                         }
+                                     ],
+                            "VpcId":  "vpc-0fffd26ae6533fc4a",
+                            "OwnerId":  "394281571385"
+                        },
+                        {
+                            "Associations":  [
+                                                 {
+                                                     "NetworkAclAssociationId":  "aclassoc-02bc06affda06cf5f",
+                                                     "NetworkAclId":  "acl-0c461e7c980d08c00",
+                                                     "SubnetId":  "subnet-0bb85343431599a33"
+                                                 }
+                                             ],
+                            "Entries":  [
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  90
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.1.0/24",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  100
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  110
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  true,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  120
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/8",
+                                                "Egress":  true,
+                                                "IcmpTypeCode":  {
+                                                                     "Code":  -1,
+                                                                     "Type":  -1
+                                                                 },
+                                                "Protocol":  "1",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  130
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  true,
+                                                "Protocol":  "-1",
+                                                "RuleAction":  "deny",
+                                                "RuleNumber":  32767
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  80,
+                                                                  "To":  80
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  90
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  91
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  22,
+                                                                  "To":  22
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  92
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.1.0/24",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  100
+                                            },
+                                            {
+                                                "CidrBlock":  "10.2.1.0/24",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  80,
+                                                                  "To":  80
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  101
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  8443,
+                                                                  "To":  8443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  110
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  443,
+                                                                  "To":  443
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  111
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/16",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  22,
+                                                                  "To":  22
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  112
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  false,
+                                                "PortRange":  {
+                                                                  "From":  1024,
+                                                                  "To":  65535
+                                                              },
+                                                "Protocol":  "6",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  120
+                                            },
+                                            {
+                                                "CidrBlock":  "10.0.0.0/8",
+                                                "Egress":  false,
+                                                "IcmpTypeCode":  {
+                                                                     "Code":  -1,
+                                                                     "Type":  -1
+                                                                 },
+                                                "Protocol":  "1",
+                                                "RuleAction":  "allow",
+                                                "RuleNumber":  130
+                                            },
+                                            {
+                                                "CidrBlock":  "0.0.0.0/0",
+                                                "Egress":  false,
+                                                "Protocol":  "-1",
+                                                "RuleAction":  "deny",
+                                                "RuleNumber":  32767
+                                            }
+                                        ],
+                            "IsDefault":  false,
+                            "NetworkAclId":  "acl-0c461e7c980d08c00",
+                            "Tags":  [
+                                         {
+                                             "Key":  "ManagedBy",
+                                             "Value":  "terraform"
+                                         },
+                                         {
+                                             "Key":  "Owner",
+                                             "Value":  "replace-me"
+                                         },
+                                         {
+                                             "Key":  "Environment",
+                                             "Value":  "dev"
+                                         },
+                                         {
+                                             "Key":  "Name",
+                                             "Value":  "nacl-c-portal"
+                                         },
+                                         {
+                                             "Key":  "Project",
+                                             "Value":  "tgw-segmentation-lab"
+                                         }
+                                     ],
+                            "VpcId":  "vpc-0fffd26ae6533fc4a",
+                            "OwnerId":  "394281571385"
+                        }
+                    ]
+}

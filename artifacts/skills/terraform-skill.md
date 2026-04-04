@@ -220,3 +220,17 @@ terraform output rdp_password_decrypt_command  # CLI to decrypt Windows password
 
 - A full per-VPC to per-subnet NACL refactor can legitimately destroy about 100 `aws_network_acl_rule` resources in one plan. Treat that as expected churn when old per-VPC ACLs are being replaced by per-subnet ACLs.
 - Set the operator safety threshold from resource-type analysis, not a raw destroy count. Large NACL-rule churn can be safe, but any destroy or replace involving `aws_vpc`, `aws_ec2_transit_gateway`, or `aws_ec2_transit_gateway_vpc_attachment` still requires an immediate stop and explicit review.
+
+## 2026-04-04 - Simplified operator path after internal NLB removal
+
+- The lab no longer includes internal `NLB-B` or `NLB-C`. Do not reintroduce them unless the operator explicitly asks for that architecture again.
+- The direct VPC-A validation path depends on these codified NACL updates:
+  - `nacl-a` ingress rules `111`, `112`, `113`
+  - `nacl-a` egress rule `125`
+  - `nacl-c-dmz` egress rule `96`
+- The current operator validation targets are direct private IPs from VPC-A:
+  - `10.1.3.10`
+  - `10.2.2.10`
+  - `10.2.3.10`
+  - `10.2.4.10`
+- Keep the VPC-A to VPC-D isolation intact. A plan that creates reachability from VPC-A to `10.3.0.0/16` should be treated as a segmentation regression.

@@ -290,3 +290,14 @@ Remind user to run `terraform destroy` when lab is complete.
 
 - A full per-VPC to per-subnet NACL refactor can legitimately destroy about 100 `aws_network_acl_rule` resources. Do not treat that raw count by itself as a failure condition.
 - When reviewing a large refactor, base the stop/go call on resource types. High `aws_network_acl_rule` churn can be expected, but destroys or replacements touching `aws_vpc`, `aws_ec2_transit_gateway`, or `aws_ec2_transit_gateway_vpc_attachment` still require an immediate operator stop and review.
+
+## 2026-04-04 - Direct private-IP validation after NLB removal
+
+- Internal `NLB-B` and `NLB-C` were removed from the lab. Do not use their old DNS names as the primary validation path.
+- From VPC-A, validate directly against:
+  - `B1` mgmt: `10.1.3.10`
+  - `C1` portal: `10.2.2.10`
+  - `C2` gateway: `10.2.3.10`
+  - `C3` controller: `10.2.4.10`
+- `D1` at `10.3.1.10` must remain unreachable from VPC-A.
+- The A2 diagnostic role does not include `ec2:SearchTransitGatewayRoutes`. If that command fails on A2, treat it as an IAM limitation, not automatic proof of a broken TGW route.
