@@ -54,6 +54,9 @@ locals {
     "a-to-b"                = { subnet = "a", destination = "10.1.0.0/16", igw = null, tgw = "tgw1" }
     "a-to-c"                = { subnet = "a", destination = "10.2.0.0/16", igw = null, tgw = "tgw1" }
     "b_untrust-internet"    = { subnet = "b_untrust", destination = "0.0.0.0/0", igw = "b", tgw = null }
+    "b_untrust-to-a"        = { subnet = "b_untrust", destination = "10.0.0.0/16", igw = null, tgw = "tgw1" }
+    "b_untrust-to-c"        = { subnet = "b_untrust", destination = "10.2.0.0/16", igw = null, tgw = "tgw1" }
+    "b_untrust-to-d"        = { subnet = "b_untrust", destination = "10.3.0.0/16", igw = null, tgw = "tgw2" }
     "b_trust-to-a"          = { subnet = "b_trust", destination = "10.0.0.0/16", igw = null, tgw = "tgw1" }
     "b_trust-to-c"          = { subnet = "b_trust", destination = "10.2.0.0/16", igw = null, tgw = "tgw1" }
     "b_trust-to-d"          = { subnet = "b_trust", destination = "10.3.0.0/16", igw = null, tgw = "tgw2" }
@@ -192,6 +195,9 @@ locals {
 
     # ── nacl "c_portal" (subnet-c-portal) ───────────────────────────────
     # Inbound
+    { acl = "c_portal", egress = false, rule_number = 90, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 80, to_port = 80 },
+    { acl = "c_portal", egress = false, rule_number = 91, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
+    { acl = "c_portal", egress = false, rule_number = 92, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 22, to_port = 22 },
     { acl = "c_portal", egress = false, rule_number = 100, protocol = "tcp", cidr_block = "10.2.1.0/24", from_port = 443, to_port = 443 },
     { acl = "c_portal", egress = false, rule_number = 101, protocol = "tcp", cidr_block = "10.2.1.0/24", from_port = 80, to_port = 80 },
     { acl = "c_portal", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 8443, to_port = 8443 },
@@ -200,6 +206,7 @@ locals {
     { acl = "c_portal", egress = false, rule_number = 120, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
     { acl = "c_portal", egress = false, rule_number = 130, protocol = "icmp", cidr_block = "10.0.0.0/8", from_port = -1, to_port = -1 },
     # Outbound
+    { acl = "c_portal", egress = true, rule_number = 90, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 1024, to_port = 65535 },
     { acl = "c_portal", egress = true, rule_number = 100, protocol = "tcp", cidr_block = "10.2.1.0/24", from_port = 1024, to_port = 65535 },
     { acl = "c_portal", egress = true, rule_number = 110, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 1024, to_port = 65535 },
     { acl = "c_portal", egress = true, rule_number = 120, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 443, to_port = 443 },

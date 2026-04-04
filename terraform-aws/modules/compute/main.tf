@@ -342,15 +342,48 @@ locals {
     trimspace(local.b1_post_boot)
   )
 
-  c1_portal_userdata = replace(
-    replace(
-      replace(local.web_userdata_template, "$${HOSTNAME}", "c1-portal"),
-      "$${HTML}",
-      trimspace(local.c1_portal_html)
-    ),
-    "$${POST_BOOT}",
-    ""
-  )
+  c1_portal_userdata = replace(<<-BASH
+  #!/bin/bash
+  set -euxo pipefail
+  hostnamectl set-hostname c1-portal
+
+  # Best-effort cleanup if a prior placeholder server is already bound.
+  command -v fuser >/dev/null 2>&1 && fuser -k 80/tcp 2>/dev/null || true
+  command -v fuser >/dev/null 2>&1 && fuser -k 443/tcp 2>/dev/null || true
+
+  dnf install -y nginx openssl psmisc
+
+  fuser -k 80/tcp 2>/dev/null || true
+  fuser -k 443/tcp 2>/dev/null || true
+
+  mkdir -p /etc/nginx/ssl
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/selfsigned.key \
+    -out /etc/nginx/ssl/selfsigned.crt \
+    -subj "/CN=appgate-sim.lab/O=TGW-Lab/C=US"
+
+  cat > /usr/share/nginx/html/index.html <<'HTML'
+  __HTML__
+  HTML
+
+  cat > /etc/nginx/conf.d/ssl.conf <<'NGINXCONF'
+  server {
+      listen 443 ssl;
+      server_name _;
+      ssl_certificate /etc/nginx/ssl/selfsigned.crt;
+      ssl_certificate_key /etc/nginx/ssl/selfsigned.key;
+      location / {
+          root /usr/share/nginx/html;
+          index index.html;
+      }
+  }
+  NGINXCONF
+
+  systemctl enable --now sshd
+  systemctl enable nginx
+  systemctl restart nginx
+  BASH
+  , "__HTML__", trimspace(local.c1_portal_html))
 
   c2_gateway_userdata = replace(
     replace(
