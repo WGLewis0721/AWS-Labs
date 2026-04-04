@@ -9,7 +9,7 @@ Use that file for the full workflow.
 
 Assume all of the following unless the operator explicitly says the design changed:
 
-- no internal `NLB-B` or `NLB-C`
+- no internal validation load balancers
 - direct private-IP validation from `A1` and `A2`
 - one public customer-entry load balancer only
 - no custom Route 53 resources
@@ -93,10 +93,10 @@ Fix:
 ### 2026-04-04 - old reports were polluted by removed load balancers
 
 Symptom:
-- scripts kept flagging NLB failures that no longer mattered.
+- scripts kept flagging legacy load-balancer failures that no longer mattered.
 
 Root cause:
-- troubleshooting logic still assumed the pre-refactor internal NLB model.
+- troubleshooting logic still assumed the pre-refactor internal validation load-balancer model.
 
 Fix:
 - switch the default validation path to direct private IPs and keep the public customer-entry load balancer separate from operator-path checks

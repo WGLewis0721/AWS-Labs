@@ -45,7 +45,7 @@ Use the smallest workflow that solves the task:
 
 Assume these are true unless the task explicitly says they changed:
 
-- no internal `NLB-B` or `NLB-C`
+- no internal validation load balancers
 - direct private-IP validation from `A1` and `A2`
 - one public customer-entry load balancer only
 - Route 53 is not used for custom lab resources

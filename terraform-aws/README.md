@@ -73,9 +73,9 @@ This is the current operator model. Future docs and prompts should assume this u
 
 Important current-state facts:
 
-- There are no internal `NLB-B` or `NLB-C` load balancers anymore.
+- Operator validation uses direct private-IP targets. There are no separate internal validation load balancers in the design.
 - Route 53 is not used for this lab beyond the AWS-managed default VPC resolver. There are no custom hosted zones or custom Resolver endpoints.
-- The output name `alb_dns_name` is kept for compatibility, but the current customer-entry load balancer is implemented as a TLS Network Load Balancer in AWS.
+- The output name `alb_dns_name` is kept for compatibility and refers to the public customer-entry load balancer DNS name.
 
 ## Instance Inventory
 
@@ -110,7 +110,7 @@ Healthy state:
 | B1 | D1 | SSH / ICMP | allowed |
 | Customer-entry LB | B1 untrust | TLS 443 | allowed |
 
-Do not use the old internal NLB DNS names for validation. They were removed from the design.
+Do not use legacy internal DNS validation paths. Use the direct private-IP targets listed above.
 
 ## Preferred Deployment Workflow
 

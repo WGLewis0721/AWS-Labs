@@ -23,7 +23,7 @@ Use it for:
 
 Assume these are true unless the user explicitly says the architecture has changed:
 
-- no internal `NLB-B` or `NLB-C`
+- no internal validation load balancers
 - direct private-IP validation from VPC-A
 - one public customer-entry load balancer only
 - no custom Route 53 resources in use

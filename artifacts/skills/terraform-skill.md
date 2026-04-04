@@ -15,7 +15,7 @@ Use this skill when:
 
 Assume this architecture unless the user explicitly says otherwise:
 
-- no internal `NLB-B` or `NLB-C`
+- no internal validation load balancers
 - direct private-IP operator validation from VPC-A
 - one public customer-entry load balancer in VPC-B untrust
 - centralized egress through the NAT Gateway in VPC-A
@@ -244,7 +244,7 @@ Useful outputs:
 
 Compatibility note:
 
-- `alb_dns_name` is still the output name even though the underlying AWS resource is currently a TLS Network Load Balancer
+- `alb_dns_name` is still the output name for compatibility and refers to the public customer-entry load balancer DNS name
 
 ## Common Errors
 
@@ -253,5 +253,5 @@ Compatibility note:
 | TGW route looks right but TCP still fails | one subnet route table is missing the return path | inspect the specific subnet route table, not just the VPC |
 | SG looks right but HTTPS still times out | one NACL hop is missing | check `nacl-a`, `nacl-c-dmz`, and destination subnet NACL |
 | nginx not serving on C1 | placeholder server still bound or nginx incomplete | check `cloud-init`, kill listeners, rebuild nginx config |
-| A1/A2 validation uses old NLB names | stale docs or stale prompts | switch to direct private-IP checks |
+| A1/A2 validation uses legacy internal DNS names | stale docs or stale prompts | switch to direct private-IP checks |
 | Fresh deploy takes too long or drifts | not using golden AMIs and staged deploy flow | use `artifacts/scripts/deploy.ps1` |

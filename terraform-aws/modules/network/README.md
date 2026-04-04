@@ -25,13 +25,13 @@ This module now reflects the post-refactor design:
 - per-subnet route tables, not per-VPC route tables
 - per-subnet NACLs, not per-VPC NACLs
 - direct private-IP operator validation from VPC-A
-- no internal `NLB-B` or `NLB-C`
+- no internal validation load balancers
 - one public customer-entry load balancer only
 
 Compatibility nuance:
 
 - the module still exports `alb_dns_name`
-- the underlying AWS resource is currently a TLS Network Load Balancer
+- the output name is retained for compatibility with existing automation
 
 ## Most Important Route Behaviors
 

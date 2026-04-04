@@ -29,7 +29,7 @@ Operator-path private validation from VPC-A depends on these SG expectations:
 
 ## Current Architecture Notes
 
-- internal `NLB-B` and `NLB-C` are removed
+- internal validation load balancers are not part of the current design
 - do not preserve old SG rules that only existed to support those removed internal load balancers
 - the security groups are only one part of the path; they must remain aligned with the per-subnet NACLs in the network module
 

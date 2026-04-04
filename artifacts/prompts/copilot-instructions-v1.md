@@ -47,7 +47,7 @@ This is the current working architecture. Future sessions should assume this unl
 
 Architecture facts that matter operationally:
 
-- internal `NLB-B` and `NLB-C` are removed
+- internal validation load balancers are not part of the current design
 - operator validation from VPC-A uses direct private IPs
 - one public customer-entry load balancer still exists in VPC-B untrust
 - Route 53 is not part of the custom lab architecture
@@ -133,7 +133,7 @@ Negative control:
 
 - `10.3.1.10` must fail from VPC-A
 
-Do not default to the removed internal NLB DNS names. If a prompt or report still references them, treat that as stale guidance.
+Do not default to legacy internal DNS validation paths. If a prompt or report still references them, treat that as stale guidance.
 
 Prefer SSM netchecks for routine validation:
 

@@ -87,7 +87,7 @@ Important outputs:
 
 Compatibility note:
 
-- `alb_dns_name` remains the output name even though the underlying AWS resource is currently a TLS Network Load Balancer
+- `alb_dns_name` remains the output name for compatibility and refers to the public customer-entry load balancer DNS name
 
 ## Current Validation Model
 
@@ -103,4 +103,4 @@ Negative control:
 
 - `10.3.1.10` must fail from VPC-A
 
-Do not rely on the removed internal NLB paths.
+Do not rely on legacy internal DNS validation paths.

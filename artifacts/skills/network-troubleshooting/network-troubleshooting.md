@@ -6,7 +6,7 @@
 
 Use this skill for the current direct-access TGW segmentation lab.
 
-The lab no longer uses internal `NLB-B` or `NLB-C` for operator validation. Operator checks from VPC-A go directly to private IPs.
+The lab no longer uses separate internal validation load balancers for operator validation. Operator checks from VPC-A go directly to private IPs.
 
 Write findings to:
 `artifacts/results/YYYY-MM-DD_network-diagnosis-<issue>.md`
@@ -233,7 +233,7 @@ The script payloads and output capture paths are already standardized in the rep
 
 ### 2026-04-04 - Direct private-IP model
 
-- Internal `NLB-B` and `NLB-C` were removed.
+- Legacy internal validation load balancers were removed.
 - `B1` operator validation should use `10.1.3.10`, not the untrust or trust ENI.
 - `C3` validation should use `443`, not `8443`, for the landing page.
 
