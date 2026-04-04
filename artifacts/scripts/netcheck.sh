@@ -4,13 +4,14 @@
 # Run from: A2 Linux (10.0.1.20) in VPC-A
 # Purpose: Validate the simplified direct-access lab design after NLB removal
 # Usage:   KEY_PATH=~/tgw-lab-key.pem bash ~/netcheck.sh
+# Optional: REPORT_FILE=/tmp/custom-report.txt
 # ============================================================================
 
-set -euo pipefail
+set -uo pipefail
 
 REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 KEY_PATH="${KEY_PATH:-/home/ec2-user/tgw-lab-key.pem}"
-REPORT_FILE="/tmp/netcheck-$(date +%Y%m%d-%H%M%S).txt"
+REPORT_FILE="${REPORT_FILE:-/tmp/netcheck-$(date +%Y%m%d-%H%M%S).txt}"
 
 IP_A2="10.0.1.20"
 IP_B1_MGMT="10.1.3.10"

@@ -1,0 +1,47 @@
+---
+schemaVersion: '2.2'
+description: Run the TGW segmentation lab netcheck script on A1 Windows and optionally upload the report to S3.
+parameters:
+  ScriptPath:
+    type: String
+    description: Path to the A1 netcheck PowerShell script on the instance.
+    default: C:\Temp\netcheck-a1.ps1
+  ReportPath:
+    type: String
+    description: Path where the report should be written on the instance.
+    default: C:\Temp\netcheck-a1-ssm.txt
+  KeyPath:
+    type: String
+    description: Optional SSH key path if A1 should attempt SSH hostname checks.
+    default: ''
+  S3Bucket:
+    type: String
+    description: Optional S3 bucket for direct upload from the instance. Leave blank to skip.
+    default: ''
+  S3KeyPrefix:
+    type: String
+    description: Optional S3 key prefix for direct upload from the instance.
+    default: tgw-lab/netchecks/a1
+mainSteps:
+  - action: aws:runPowerShellScript
+    name: runA1Netcheck
+    inputs:
+      timeoutSeconds: '1800'
+      runCommand:
+        - '$ErrorActionPreference = "Stop"'
+        - 'if (-not (Test-Path "{{ ScriptPath }}")) { throw "Script not found at {{ ScriptPath }}" }'
+        - '& "{{ ScriptPath }}" -ReportFile "{{ ReportPath }}" -KeyPath "{{ KeyPath }}"'
+        - |
+          if (-not [string]::IsNullOrWhiteSpace("{{ S3Bucket }}")) {
+            $aws = Get-Command aws.exe -ErrorAction SilentlyContinue
+            if ($aws) {
+              & $aws.Source s3 cp "{{ ReportPath }}" "s3://{{ S3Bucket }}/{{ S3KeyPrefix }}/$(Split-Path -Leaf "{{ ReportPath }}")" --only-show-errors
+              if ($LASTEXITCODE -eq 0) {
+                Write-Output "PASS - Uploaded report to s3://{{ S3Bucket }}/{{ S3KeyPrefix }}/$(Split-Path -Leaf "{{ ReportPath }}")"
+              } else {
+                Write-Output "WARN - Direct S3 upload from A1 failed"
+              }
+            } else {
+              Write-Output "WARN - AWS CLI not installed on A1; rely on send-command output S3 capture"
+            }
+          }
