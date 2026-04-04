@@ -79,14 +79,14 @@ function Get-InstanceMetadata {
 
 function Test-TcpPort {
     param(
-        [string]$Host,
+        [string]$TargetHost,
         [int]$Port,
         [int]$TimeoutSeconds = 5
     )
 
     try {
         $client = New-Object System.Net.Sockets.TcpClient
-        $async = $client.BeginConnect($Host, $Port, $null, $null)
+        $async = $client.BeginConnect($TargetHost, $Port, $null, $null)
         $ok = $async.AsyncWaitHandle.WaitOne($TimeoutSeconds * 1000, $false)
         $connected = $ok -and $client.Connected
         $client.Close()
@@ -118,7 +118,7 @@ function Get-HttpStatus {
 }
 
 function Invoke-SshHostname {
-    param([string]$Host)
+    param([string]$TargetHost)
     if ([string]::IsNullOrWhiteSpace($KeyPath) -or -not (Test-Path $KeyPath)) {
         return $null
     }
@@ -135,7 +135,7 @@ function Invoke-SshHostname {
             -o UserKnownHostsFile=/dev/null `
             -o ConnectTimeout=5 `
             -o BatchMode=yes `
-            "ec2-user@$Host" hostname 2>$null
+            "ec2-user@$TargetHost" hostname 2>$null
         if ($LASTEXITCODE -eq 0 -and $result) {
             return ($result | Select-Object -First 1)
         }
@@ -146,9 +146,9 @@ function Invoke-SshHostname {
 }
 
 function Test-Icmp {
-    param([string]$Host)
+    param([string]$TargetHost)
     try {
-        return Test-Connection -ComputerName $Host -Count 2 -Quiet -ErrorAction Stop
+        return Test-Connection -ComputerName $TargetHost -Count 2 -Quiet -ErrorAction Stop
     } catch {
         return $false
     }
@@ -190,14 +190,14 @@ Write-Header "SECTION 2 - Direct Private Reachability"
 foreach ($target in $targets) {
     Write-Check ("Testing {0} ({1})" -f $target.Name, $target.Host)
 
-    if (Test-Icmp -Host $target.Host) {
+    if (Test-Icmp -TargetHost $target.Host) {
         Write-Pass ("{0} ping reachable" -f $target.Name)
     } else {
         Write-Fail ("{0} ping unreachable" -f $target.Name)
     }
 
     foreach ($port in $target.Ports) {
-        if (Test-TcpPort -Host $target.Host -Port $port) {
+        if (Test-TcpPort -TargetHost $target.Host -Port $port) {
             Write-Pass ("{0} TCP {1} is OPEN" -f $target.Name, $port)
         } else {
             Write-Fail ("{0} TCP {1} is UNREACHABLE" -f $target.Name, $port)
@@ -213,7 +213,7 @@ foreach ($target in $targets) {
         }
     }
 
-    $hostname = Invoke-SshHostname -Host $target.Host
+    $hostname = Invoke-SshHostname -TargetHost $target.Host
     if ($hostname) {
         Write-Pass ("{0} SSH hostname: {1}" -f $target.Name, $hostname)
     } elseif (-not [string]::IsNullOrWhiteSpace($KeyPath)) {
@@ -223,13 +223,13 @@ foreach ($target in $targets) {
 
 Write-Header "SECTION 3 - VPC-D Isolation"
 Write-Check ("Testing D1 isolation at {0}" -f $d1Host)
-if (Test-Icmp -Host $d1Host) {
+if (Test-Icmp -TargetHost $d1Host) {
     Write-Fail "Isolation breach - A1 can ping D1"
 } else {
     Write-Pass "Isolation confirmed - A1 cannot ping D1"
 }
 
-if (Test-TcpPort -Host $d1Host -Port 80 -TimeoutSeconds 3) {
+if (Test-TcpPort -TargetHost $d1Host -Port 80 -TimeoutSeconds 3) {
     Write-Fail "Isolation breach - TCP 80 to D1 is OPEN"
 } else {
     Write-Pass "Isolation confirmed - TCP 80 to D1 is blocked"
