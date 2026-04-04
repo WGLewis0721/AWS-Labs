@@ -1,11 +1,15 @@
 ---
 schemaVersion: '2.2'
-description: Run the TGW segmentation lab netcheck script on A2 Linux and optionally upload the report to S3.
+description: Download and run the TGW segmentation lab netcheck script on A2 Linux.
 parameters:
-  ScriptPath:
+  ScriptUrl:
     type: String
-    description: Path to the A2 netcheck script on the instance.
-    default: /home/ec2-user/netcheck.sh
+    description: S3 URL for the A2 netcheck shell script.
+    default: https://s3.amazonaws.com/terraform-lab-wgl/ssm/netcheck/a2/netcheck.sh
+  LocalScriptPath:
+    type: String
+    description: Local file path on the instance where the netcheck script should be downloaded.
+    default: /tmp/netcheck.sh
   KeyPath:
     type: String
     description: Path to the lab SSH key on the instance for hop checks.
@@ -14,33 +18,22 @@ parameters:
     type: String
     description: Path where the report should be written on the instance.
     default: /tmp/netcheck-a2-ssm.txt
-  S3Bucket:
-    type: String
-    description: Optional S3 bucket for direct upload from the instance. Leave blank to skip.
-    default: ''
-  S3KeyPrefix:
-    type: String
-    description: Optional S3 key prefix for direct upload from the instance.
-    default: tgw-lab/netchecks/a2
 mainSteps:
+  - action: aws:downloadContent
+    name: downloadA2Netcheck
+    inputs:
+      sourceType: S3
+      sourceInfo: '{"path":"{{ ScriptUrl }}"}'
+      destinationPath: '{{ LocalScriptPath }}'
   - action: aws:runShellScript
     name: runA2Netcheck
     inputs:
       timeoutSeconds: '1800'
       runCommand:
         - 'set -uo pipefail'
-        - 'if [ ! -f "{{ ScriptPath }}" ]; then echo "FAIL - Script not found at {{ ScriptPath }}"; exit 1; fi'
-        - 'chmod +x "{{ ScriptPath }}"'
+        - 'script="{{ LocalScriptPath }}"'
+        - 'if [ ! -f "$script" ]; then echo "FAIL - Downloaded script not found at $script"; exit 1; fi'
+        - 'chmod +x "$script"'
         - 'export KEY_PATH="{{ KeyPath }}"'
         - 'export REPORT_FILE="{{ ReportPath }}"'
-        - 'bash "{{ ScriptPath }}"'
-        - |
-          if [ -n "{{ S3Bucket }}" ]; then
-            if command -v aws >/dev/null 2>&1; then
-              aws s3 cp "{{ ReportPath }}" "s3://{{ S3Bucket }}/{{ S3KeyPrefix }}/$(basename "{{ ReportPath }}")" --only-show-errors && \
-              echo "PASS - Uploaded report to s3://{{ S3Bucket }}/{{ S3KeyPrefix }}/$(basename "{{ ReportPath }}")" || \
-              echo "WARN - Direct S3 upload from A2 failed"
-            else
-              echo "WARN - AWS CLI not installed on A2; rely on send-command output S3 capture"
-            fi
-          fi
+        - 'bash "$script"'

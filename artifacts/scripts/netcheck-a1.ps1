@@ -177,10 +177,13 @@ if ($localIp -eq $expectedA1) {
 }
 
 try {
-    route print | Add-Content -Path $ReportFile
-    Write-Info "Route table appended to report"
+    $routeOutput = route print 2>&1
+    foreach ($line in $routeOutput) {
+        Write-Line $line
+    }
+    Write-Info "Route table captured in report output"
 } catch {
-    Write-Warn "Could not append route table"
+    Write-Warn "Could not capture route table"
 }
 
 Write-Header "SECTION 2 - Direct Private Reachability"

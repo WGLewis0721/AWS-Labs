@@ -32,12 +32,12 @@ used during deployment, validation, and troubleshooting.
 ## SSM Usage
 
 Recommended pattern:
-- stage the appropriate script onto the instance
+- upload the scripts to S3
 - create the SSM document from the YAML file
 - invoke `send-command` with `--output-s3-bucket-name` and `--output-s3-key-prefix`
 
 This is the most reliable way to get results into S3 because SSM captures stdout
-even if the instance-local AWS CLI upload path is unavailable.
+and the documents can download the script from S3 at runtime.
 
 Interactive usage:
 
@@ -75,7 +75,7 @@ Run the A1 document and store command output in S3:
 aws ssm send-command `
   --document-name lab-netcheck-a1 `
   --instance-ids <a1-instance-id> `
-  --parameters ScriptPath=C:\Temp\netcheck-a1.ps1,ReportPath=C:\Temp\netcheck-a1-ssm.txt `
+  --parameters ReportPath=C:\Temp\netcheck-a1-ssm.txt `
   --output-s3-bucket-name <bucket> `
   --output-s3-key-prefix tgw-lab/netchecks/a1
 ```
@@ -86,14 +86,22 @@ Run the A2 document and store command output in S3:
 aws ssm send-command `
   --document-name lab-netcheck-a2 `
   --instance-ids <a2-instance-id> `
-  --parameters ScriptPath=/home/ec2-user/netcheck.sh,ReportPath=/tmp/netcheck-a2-ssm.txt,KeyPath=/home/ec2-user/tgw-lab-key.pem `
+  --parameters ReportPath=/tmp/netcheck-a2-ssm.txt,KeyPath=/home/ec2-user/tgw-lab-key.pem `
   --output-s3-bucket-name <bucket> `
   --output-s3-key-prefix tgw-lab/netchecks/a2
 ```
 
-The SSM output S3 capture is the primary path. The documents also support an
-optional direct `aws s3 cp` from the instance when the instance has AWS CLI and
-permissions to write to the chosen bucket.
+Default script object paths:
+
+- `s3://terraform-lab-wgl/ssm/netcheck/a1/netcheck-a1.ps1`
+- `s3://terraform-lab-wgl/ssm/netcheck/a2/netcheck.sh`
+
+The SSM output S3 capture is the primary results path.
+
+If you need to override where the script lands on the instance, use:
+
+- `LocalScriptPath=C:\Temp\netcheck-a1.ps1` for `lab-netcheck-a1`
+- `LocalScriptPath=/tmp/netcheck.sh` for `lab-netcheck-a2`
 
 ## JSON Captures
 
