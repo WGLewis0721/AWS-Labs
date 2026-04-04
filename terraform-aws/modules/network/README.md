@@ -25,6 +25,7 @@ This module now reflects the post-refactor design:
 - per-subnet route tables, not per-VPC route tables
 - per-subnet NACLs, not per-VPC NACLs
 - direct private-IP operator validation from VPC-A
+- VPC-C east-west traffic to VPC-D through `TGW2`
 - no internal validation load balancers
 - one public customer-entry load balancer only
 
@@ -43,7 +44,9 @@ Critical current behaviors:
   - VPC-A through `TGW1`
   - VPC-C through `TGW1`
   - VPC-D through `TGW2`
-- VPC-C subnet route tables must keep `0.0.0.0/0 -> TGW1` for centralized egress
+- VPC-C subnet route tables must keep:
+  - `0.0.0.0/0 -> TGW1` for centralized egress
+  - `10.3.0.0/16 -> TGW2` for the `C1 <-> D1` path
 
 ## Most Important NACL Behaviors
 
@@ -58,6 +61,21 @@ Critical rules that support the current working path:
   - egress `96` tcp `80` to `10.2.2.0/24`
 - `nacl-c-portal`
   - direct VPC-A access for `80`, `443`, and `22`
+- `nacl-c-dmz`
+  - east-west rules for `C1 -> B1` and `C1 -> D1`
+  - ingress `113`-`116`, `123`
+  - egress `105`-`107`, `121`
+- `nacl-c-portal`
+  - east-west rules for `D1 -> C1` and `C1 -> B1/D1`
+  - ingress `85`
+  - egress `85`-`88`
+- `nacl-b-mgmt`
+  - ingress `90`-`91`
+  - egress `90`
+- `nacl-b-trust`
+  - ingress `85`-`86`
+- `nacl-d`
+  - ingress `115`
 
 Because NACLs are stateless, edits to this module must always consider the full request and return path, not just the destination subnet.
 

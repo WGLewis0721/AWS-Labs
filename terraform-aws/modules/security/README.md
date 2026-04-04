@@ -22,15 +22,20 @@ Public ingress is intentionally limited to:
 Operator-path private validation from VPC-A depends on these SG expectations:
 
 - `B1` mgmt allows `22` and `443` from `10.0.0.0/16`
+- `B1` mgmt allows `22` and `443` from `10.2.0.0/16`
 - `C1` allows `22`, `80`, and `443` from `10.0.0.0/16`
+- `C1` allows `443` from `10.3.0.0/16`
 - `C2` allows `22` and `443` from `10.0.0.0/16`
 - `C3` allows `22` and `443` from `10.0.0.0/16`
+- `C1` egress supports `22/443` to `B1` mgmt and ephemeral return to VPC-D
+- `D1` allows `443` from `10.2.0.0/16`
 - `D1` must not be reachable from VPC-A
 
 ## Current Architecture Notes
 
 - internal validation load balancers are not part of the current design
 - do not preserve old SG rules that only existed to support those removed internal load balancers
+- preserve the validated east-west SG rules for `C1 <-> B1` mgmt and `C1 <-> D1`
 - the security groups are only one part of the path; they must remain aligned with the per-subnet NACLs in the network module
 
 ## Management CIDRs

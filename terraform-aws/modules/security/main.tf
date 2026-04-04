@@ -226,12 +226,36 @@ resource "aws_security_group" "palo_mgmt" {
     cidr_blocks = ["10.0.0.0/16"]
   }
 
+  ingress {
+    description = "SSH from VPC-C"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.0.0/16"]
+  }
+
+  ingress {
+    description = "HTTPS from VPC-C"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.0.0/16"]
+  }
+
   egress {
     description = "Return to VPC-A"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  egress {
+    description = "Ephemeral return to VPC-C"
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.0.0/16"]
   }
 
   egress {
@@ -300,6 +324,14 @@ resource "aws_security_group" "c1_portal" {
     cidr_blocks = ["10.0.0.0/8"]
   }
 
+  ingress {
+    description = "HTTPS from VPC-D customer"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.3.0.0/16"]
+  }
+
   egress {
     description = "Portal to Gateway tunnel"
     from_port   = 443
@@ -325,6 +357,22 @@ resource "aws_security_group" "c1_portal" {
   }
 
   egress {
+    description = "SSH to B1 mgmt"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.3.0/24"]
+  }
+
+  egress {
+    description = "HTTPS to B1 mgmt"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.3.0/24"]
+  }
+
+  egress {
     description = "IdP calls via NAT GW"
     from_port   = 443
     to_port     = 443
@@ -338,6 +386,14 @@ resource "aws_security_group" "c1_portal" {
     to_port     = 65535
     protocol    = "tcp"
     cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  egress {
+    description = "Ephemeral return to VPC-D"
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["10.3.0.0/16"]
   }
 
   tags = merge(var.tags, { Name = "lab-sg-c1-portal" })
@@ -607,6 +663,14 @@ resource "aws_security_group" "d" {
   }
 
   ingress {
+    description = "HTTPS from VPC-C AppGate"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.0.0/16"]
+  }
+
+  ingress {
     description = "ICMP from VPC-B"
     from_port   = -1
     to_port     = -1
@@ -634,6 +698,14 @@ resource "aws_security_group" "d" {
     description = "HTTPS to AppGate service tier"
     from_port   = 443
     to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.2.0.0/16"]
+  }
+
+  egress {
+    description = "Ephemeral return to VPC-C"
+    from_port   = 1024
+    to_port     = 65535
     protocol    = "tcp"
     cidr_blocks = ["10.2.0.0/16"]
   }

@@ -18,6 +18,7 @@ Important current assumptions:
 - `B1` is validated operationally through the mgmt ENI `10.1.3.10`
 - `C1`, `C2`, and `C3` are private-only
 - `C3` landing-page validation is currently on `443`, not `8443`
+- `C1` and `D1` keep `source_dest_check = false` in the current validated east-west design
 - `instance_ami_ids` can override default AMIs for staged deployments
 
 ## Golden AMI Support

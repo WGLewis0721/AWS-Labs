@@ -1059,7 +1059,7 @@ $elapsed = (Get-Date) - $script:StartTime
 
 Write-Info "A1 public IP: $a1PublicIp"
 Write-Info "A2 public IP: $a2PublicIp"
-Write-Info "Customer entry ALB: https://$($outputs.alb_dns_name.value)"
+Write-Info "Customer entry load balancer: https://$($outputs.alb_dns_name.value)"
 Write-Info "Golden AMIs:"
 foreach ($nodeKey in $amiMap.Keys) {
   Write-Info ("  {0}: {1}" -f $nodeKey, $amiMap[$nodeKey])
@@ -1071,6 +1071,11 @@ Write-Info "  http://10.2.2.10"
 Write-Info "  https://10.2.2.10"
 Write-Info "  https://10.2.3.10"
 Write-Info "  https://10.2.4.10"
+Write-Info "East-west service paths:"
+Write-Info "  C1 -> B1 mgmt: SSH 22 and HTTPS 443"
+Write-Info "  C1 -> D1: HTTPS 443"
+Write-Info "  D1 -> C1: HTTPS 443"
+Write-Info ("Connectivity test matrix:`n{0}" -f $outputs.test_commands.value)
 
 Write-Info "Windows password command:"
 Write-Info "  $($outputs.rdp_password_decrypt_command.value)"

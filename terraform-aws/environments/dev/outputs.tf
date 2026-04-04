@@ -106,9 +106,18 @@ output "test_commands" {
   # Expected: ${module.network.nat_gateway_eip}
 
   From c1-portal (SSH: A2 → 10.2.2.10):
+  timeout 5 bash -lc '</dev/tcp/10.1.3.10/22' >/dev/null 2>&1 && echo "B1 mgmt SSH reachable"   # MUST WORK
+  curl -sk -o /dev/null -w "%%{http_code}" https://10.1.3.10       # B1 mgmt HTTPS — MUST WORK
+  curl -sk -o /dev/null -w "%%{http_code}" https://10.3.1.10       # D1 HTTPS — MUST WORK
   curl -sk -o /dev/null -w "%%{http_code}" https://10.2.3.10       # Gateway — MUST WORK
   curl -sk -o /dev/null -w "%%{http_code}" https://10.2.4.10       # Controller — MUST WORK
   curl -s  --connect-timeout 10 https://checkip.amazonaws.com      # NAT GW egress
+
+  From D1 (customer shell, if available):
+  curl -sk -o /dev/null -w "%%{http_code}" https://10.2.2.10       # c1-portal HTTPS — MUST WORK
+  # If D1 shell access is unavailable, validate D1 → C1 HTTPS with Reachability Analyzer.
+  # Known nuance: once source/dest check is disabled on C1 and D1, the analyzer can still
+  # report a false-positive SG mismatch even when the rule set is correct.
 
 Customer entry load balancer (internet-facing):
 curl -sk -o /dev/null -w "%%{http_code}" https://${module.network.alb_dns_name}

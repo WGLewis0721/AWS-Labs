@@ -12,6 +12,7 @@ The `dev` environment is the real lab, not a toy example. It includes:
 - the public management edge (`A1`, `A2`)
 - the public customer-entry load balancer
 - the private operator validation targets in VPC-B and VPC-C
+- the east-west service paths between `C1`, `B1` mgmt, and `D1`
 
 This environment is the one that future troubleshooting and deployment prompts should assume by default.
 
@@ -102,5 +103,11 @@ Primary operator validation targets:
 Negative control:
 
 - `10.3.1.10` must fail from VPC-A
+
+Secondary east-west validation targets:
+
+- `C1 -> 10.1.3.10` on `22` and `443`
+- `C1 -> 10.3.1.10` on `443`
+- `D1 -> 10.2.2.10` on `443`
 
 Do not rely on legacy internal DNS validation paths.

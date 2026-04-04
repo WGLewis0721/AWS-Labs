@@ -614,6 +614,7 @@ resource "aws_instance" "this" {
   instance_type               = each.value.instance_type
   key_name                    = aws_key_pair.lab.key_name
   private_ip                  = each.value.private_ip
+  source_dest_check           = contains(["c1_portal", "d1"], each.key) ? false : true
   subnet_id                   = var.subnet_ids[each.value.subnet_key]
   user_data                   = each.value.user_data
   user_data_replace_on_change = true

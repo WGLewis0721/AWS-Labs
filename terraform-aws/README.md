@@ -69,6 +69,8 @@ This is the current operator model. Future docs and prompts should assume this u
 - `A1` and `A2` do not have a direct route to VPC-D
 - `B1`, `C1`, `C2`, and `C3` use centralized egress through `TGW1 -> VPC-A NAT`
 - `B1` and VPC-C nodes participate in both transit domains
+- `C1` can initiate SSH and HTTPS to `B1` mgmt and HTTPS to `D1`
+- `D1` can initiate HTTPS to `C1`
 - `D1` is intentionally isolated from VPC-A
 
 Important current-state facts:
@@ -107,6 +109,9 @@ Healthy state:
 | A2 | `10.2.3.10` | SSH / HTTPS / ICMP | allowed |
 | A2 | `10.2.4.10` | SSH / HTTPS / ICMP | allowed |
 | A2 | `10.3.1.10` | SSH / HTTP / ICMP | blocked |
+| C1 | `10.1.3.10` | SSH / HTTPS | allowed |
+| C1 | `10.3.1.10` | HTTPS | allowed |
+| D1 | `10.2.2.10` | HTTPS | allowed |
 | B1 | D1 | SSH / ICMP | allowed |
 | Customer-entry LB | B1 untrust | TLS 443 | allowed |
 
@@ -208,6 +213,33 @@ Expected:
 - `200` for the VPC-B and VPC-C targets
 - failure for `D1`
 
+### East-west service checks
+
+From `C1` (SSH: `A2 -> 10.2.2.10`), validate:
+
+```bash
+timeout 5 bash -lc '</dev/tcp/10.1.3.10/22' >/dev/null 2>&1 && echo "B1 mgmt SSH reachable"
+curl -sk https://10.1.3.10
+curl -sk https://10.3.1.10
+```
+
+Expected:
+
+- `B1` mgmt SSH port reachable from `C1`
+- `200` from `B1` mgmt HTTPS
+- `200` from `D1` HTTPS
+
+From `D1` if you have an interactive shell, validate:
+
+```bash
+curl -sk https://10.2.2.10
+```
+
+Expected:
+
+- `200` from `C1` HTTPS
+- Reachability Analyzer can still report a false-positive SG mismatch on the `D1 -> C1` path after `source_dest_check` is disabled on the endpoint instances
+
 ### SSM netchecks
 
 Canonical netcheck scripts live under `artifacts/scripts/`:
@@ -257,11 +289,12 @@ The B1 untrust subnet must keep:
 
 Without those return routes, ping may work while TCP fails.
 
-### 3. VPC-C route tables need default egress through `TGW1`
+### 3. VPC-C route tables need default egress through `TGW1` and a VPC-D route through `TGW2`
 
 The VPC-C subnets use centralized egress:
 
 - `0.0.0.0/0 -> TGW1 -> VPC-A NAT`
+- `10.3.0.0/16 -> TGW2`
 
 That is required for package installation, updates, and bootstrap resilience.
 
@@ -294,7 +327,16 @@ Required behavior:
 - write `/etc/nginx/conf.d/ssl.conf`
 - enable and restart nginx
 
-### 7. The deploy script is the canonical convergence workflow
+### 7. `C1` and `D1` keep `source_dest_check = false`
+
+The validated east-west model requires:
+
+- `C1` source/dest check disabled
+- `D1` source/dest check disabled
+
+If those drift back to `true`, Reachability Analyzer and cross-VPC forwarding behavior will regress.
+
+### 8. The deploy script is the canonical convergence workflow
 
 The repo is now designed around:
 

@@ -364,49 +364,6 @@ function Remove-NaclEntryIfPresent {
   return 1
 }
 
-function Remove-C1HttpSecurityGroupRuleIfPresent {
-  $rules = Get-AwsJson -Arguments @(
-    "ec2", "describe-security-group-rules",
-    "--filters", "Name=group-id,Values=sg-0c044168b47ec90bf",
-    "--output", "json",
-    "--region", $script:Region
-  )
-
-  if (-not $rules) {
-    return $script:SkipToken
-  }
-
-  $ruleIds = @(
-    $rules.SecurityGroupRules |
-      Where-Object {
-        $_.IsEgress -eq $false -and
-        $_.FromPort -eq 80 -and
-        $_.ToPort -eq 80 -and
-        $_.CidrIpv4 -eq "10.0.0.0/16"
-      } |
-      Select-Object -ExpandProperty SecurityGroupRuleId
-  )
-
-  if ($ruleIds.Count -eq 0) {
-    return $script:SkipToken
-  }
-
-  $arguments = @(
-    "ec2", "revoke-security-group-ingress",
-    "--group-id", "sg-0c044168b47ec90bf",
-    "--security-group-rule-ids"
-  ) + $ruleIds + @(
-    "--region", $script:Region
-  )
-
-  $result = Invoke-AwsRaw -Arguments $arguments
-  if ($result.ExitCode -ne 0) {
-    throw $result.CombinedOutput
-  }
-
-  return $ruleIds.Count
-}
-
 function Remove-IamRoleAndProfileIfPresent {
   param(
     [Parameter(Mandatory = $true)]
@@ -744,11 +701,6 @@ if ($stateListResult.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($stat
 }
 
 $manualInventory = @(
-  "lab-rt-b-untrust: up to 3 legacy route entries",
-  "nacl-c-portal: up to 4 legacy NACL entries",
-  "nacl-c-dmz: up to 1 legacy NACL entry",
-  "nacl-a: up to 4 legacy NACL entries",
-  "C1 security group: 1 legacy inbound TCP 80 rule",
   "IAM: lab-a1-diagnostic-role + lab-a1-diagnostic-profile",
   "IAM: lab-a2-diagnostic-role + lab-a2-diagnostic-profile",
   "SSM: lab-netcheck-a1 + lab-netcheck-a2 command documents"
@@ -797,58 +749,6 @@ Invoke-ManualAction -Label "A2 IAM instance profile association" -Action {
 }
 
 Start-Sleep -Seconds 5
-
-Invoke-ManualAction -Label "nacl-a ingress rule 111" -Action {
-  Remove-NaclEntryIfPresent -NetworkAclId "acl-05413fc9ffa66da56" -RuleNumber 111 -Egress $false -StateAddress 'module.network.aws_network_acl_rule.this["a-ingress-111"]'
-}
-
-Invoke-ManualAction -Label "nacl-a ingress rule 112" -Action {
-  Remove-NaclEntryIfPresent -NetworkAclId "acl-05413fc9ffa66da56" -RuleNumber 112 -Egress $false -StateAddress 'module.network.aws_network_acl_rule.this["a-ingress-112"]'
-}
-
-Invoke-ManualAction -Label "nacl-a ingress rule 113" -Action {
-  Remove-NaclEntryIfPresent -NetworkAclId "acl-05413fc9ffa66da56" -RuleNumber 113 -Egress $false -StateAddress 'module.network.aws_network_acl_rule.this["a-ingress-113"]'
-}
-
-Invoke-ManualAction -Label "nacl-a egress rule 125" -Action {
-  Remove-NaclEntryIfPresent -NetworkAclId "acl-05413fc9ffa66da56" -RuleNumber 125 -Egress $true -StateAddress 'module.network.aws_network_acl_rule.this["a-egress-125"]'
-}
-
-Invoke-ManualAction -Label "nacl-c-portal ingress rule 90" -Action {
-  Remove-NaclEntryIfPresent -NetworkAclId "acl-0c461e7c980d08c00" -RuleNumber 90 -Egress $false -StateAddress 'module.network.aws_network_acl_rule.this["c_portal-ingress-90"]'
-}
-
-Invoke-ManualAction -Label "nacl-c-portal ingress rule 91" -Action {
-  Remove-NaclEntryIfPresent -NetworkAclId "acl-0c461e7c980d08c00" -RuleNumber 91 -Egress $false -StateAddress 'module.network.aws_network_acl_rule.this["c_portal-ingress-91"]'
-}
-
-Invoke-ManualAction -Label "nacl-c-portal ingress rule 92" -Action {
-  Remove-NaclEntryIfPresent -NetworkAclId "acl-0c461e7c980d08c00" -RuleNumber 92 -Egress $false -StateAddress 'module.network.aws_network_acl_rule.this["c_portal-ingress-92"]'
-}
-
-Invoke-ManualAction -Label "nacl-c-portal egress rule 90" -Action {
-  Remove-NaclEntryIfPresent -NetworkAclId "acl-0c461e7c980d08c00" -RuleNumber 90 -Egress $true -StateAddress 'module.network.aws_network_acl_rule.this["c_portal-egress-90"]'
-}
-
-Invoke-ManualAction -Label "nacl-c-dmz egress rule 96" -Action {
-  Remove-NaclEntryIfPresent -NetworkAclId "acl-045e906a514372224" -RuleNumber 96 -Egress $true -StateAddress 'module.network.aws_network_acl_rule.this["c_dmz-egress-96"]'
-}
-
-Invoke-ManualAction -Label "lab-rt-b-untrust route 10.0.0.0/16" -Action {
-  Remove-RouteIfPresent -RouteTableId "rtb-0e72a76ab0c661208" -DestinationCidrBlock "10.0.0.0/16" -StateAddress 'module.network.aws_route.this["b_untrust-to-a"]'
-}
-
-Invoke-ManualAction -Label "lab-rt-b-untrust route 10.2.0.0/16" -Action {
-  Remove-RouteIfPresent -RouteTableId "rtb-0e72a76ab0c661208" -DestinationCidrBlock "10.2.0.0/16" -StateAddress 'module.network.aws_route.this["b_untrust-to-c"]'
-}
-
-Invoke-ManualAction -Label "lab-rt-b-untrust route 10.3.0.0/16" -Action {
-  Remove-RouteIfPresent -RouteTableId "rtb-0e72a76ab0c661208" -DestinationCidrBlock "10.3.0.0/16" -StateAddress 'module.network.aws_route.this["b_untrust-to-d"]'
-}
-
-Invoke-ManualAction -Label "C1 security group inbound TCP 80 from VPC-A" -Action {
-  Remove-C1HttpSecurityGroupRuleIfPresent
-}
 
 Invoke-ManualAction -Label "SSM document lab-netcheck-a1" -Action {
   Remove-SsmDocumentIfPresent -Name "lab-netcheck-a1"
