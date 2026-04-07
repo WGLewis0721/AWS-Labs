@@ -1,6 +1,6 @@
-# netcheck.ps1 — TGW Segmentation Lab Network Verification
+# local-netcheck.ps1 — TGW Segmentation Lab Network Verification
 # Run from: C:\Users\Willi\projects\Labs
-# Usage: .\netcheck.ps1
+# Usage: .\artifacts\scripts\local-netcheck.ps1
 # Requirements: AWS CLI configured, SSH key at tgw-lab-key.pem
 
 $region = "us-east-1"
@@ -152,25 +152,94 @@ foreach ($inst in $instances) {
 # =============================================================================
 Write-Header "SECTION 3 — TGW Route Tables"
 
-Write-Check "Getting TGW1 route table"
-$tgw1RT = aws ec2 describe-transit-gateway-route-tables `
-    --filters "Name=tag:Name,Values=tgw1*" `
-    --query "TransitGatewayRouteTables[0].TransitGatewayRouteTableId" `
+Write-Check "Verifying Model 2+3 Spoke and Firewall RTs"
+$spokeRTs = @(aws ec2 describe-transit-gateway-route-tables `
+    --filters "Name=tag:Role,Values=spoke" `
+    --query "TransitGatewayRouteTables[*].{Name:Tags[?Key=='Name']|[0].Value,ID:TransitGatewayRouteTableId,State:State}" `
+    --output json --region $region 2>$null | ConvertFrom-Json)
+$firewallRTs = @(aws ec2 describe-transit-gateway-route-tables `
+    --filters "Name=tag:Role,Values=firewall" `
+    --query "TransitGatewayRouteTables[*].{Name:Tags[?Key=='Name']|[0].Value,ID:TransitGatewayRouteTableId,State:State}" `
+    --output json --region $region 2>$null | ConvertFrom-Json)
+$vpcBId = aws ec2 describe-vpcs `
+    --filters "Name=tag:Name,Values=*vpc-b*" `
+    --query "Vpcs[0].VpcId" `
     --output text --region $region 2>$null
-Write-Info "TGW1 route table: $tgw1RT"
 
-$expectedTGW1Routes = @("10.0.0.0/16", "10.1.0.0/16", "10.2.0.0/16")
-foreach ($cidr in $expectedTGW1Routes) {
-    $route = aws ec2 search-transit-gateway-routes `
-        --transit-gateway-route-table-id $tgw1RT `
-        --filters "Name=state,Values=active" `
-        --query "Routes[?DestinationCidrBlock=='$cidr'].State" `
-        --output text --region $region 2>$null
-    if ($route -eq "active") {
-        Write-Pass "TGW1 has active route to $cidr"
+if ($spokeRTs.Count -eq 2) {
+    Write-Pass "Found both Spoke RTs: $($spokeRTs.ID -join ', ')"
+} else {
+    Write-Fail "Expected 2 Spoke RTs, found $($spokeRTs.Count)"
+}
+
+if ($firewallRTs.Count -eq 2) {
+    Write-Pass "Found both Firewall RTs: $($firewallRTs.ID -join ', ')"
+} else {
+    Write-Fail "Expected 2 Firewall RTs, found $($firewallRTs.Count)"
+}
+
+foreach ($rt in $spokeRTs) {
+    if ($rt.State -eq "available") {
+        Write-Pass "Spoke RT found: $($rt.Name) ($($rt.ID))"
     } else {
-        Write-Fail "TGW1 MISSING route to $cidr"
+        Write-Fail "Spoke RT $($rt.Name) is $($rt.State)"
     }
+
+    $defaultTargets = aws ec2 search-transit-gateway-routes `
+        --transit-gateway-route-table-id $rt.ID `
+        --filters "Name=state,Values=active" `
+        --query "Routes[?DestinationCidrBlock=='0.0.0.0/0'].TransitGatewayAttachments[*].ResourceId" `
+        --output text --region $region 2>$null
+    if ($vpcBId -and (($defaultTargets -join " ") -match [regex]::Escape($vpcBId))) {
+        Write-Pass "Spoke RT $($rt.Name) default route points to VPC-B"
+    } else {
+        Write-Fail "Spoke RT $($rt.Name) default route does not point to VPC-B"
+    }
+}
+
+foreach ($rt in $firewallRTs) {
+    if ($rt.State -eq "available") {
+        Write-Pass "Firewall RT found: $($rt.Name) ($($rt.ID))"
+    } else {
+        Write-Fail "Firewall RT $($rt.Name) is $($rt.State)"
+    }
+
+    $assocs = aws ec2 get-transit-gateway-route-table-associations `
+        --transit-gateway-route-table-id $rt.ID `
+        --output json --region $region 2>$null | ConvertFrom-Json
+    $vpcBAssoc = @($assocs.Associations) | Where-Object { $_.ResourceId -eq $vpcBId -and $_.State -eq "associated" }
+    if ($vpcBAssoc) {
+        Write-Pass "Firewall RT $($rt.Name) is associated with VPC-B"
+    } else {
+        Write-Fail "Firewall RT $($rt.Name) is not associated with VPC-B"
+    }
+
+    $routeCidrs = aws ec2 search-transit-gateway-routes `
+        --transit-gateway-route-table-id $rt.ID `
+        --filters "Name=state,Values=active" `
+        --query "Routes[?State=='active'].DestinationCidrBlock" `
+        --output text --region $region 2>$null
+    if (($routeCidrs -join " ") -match "10\.") {
+        Write-Pass "Firewall RT $($rt.Name) has active spoke return routes: $($routeCidrs -join ' ')"
+    } else {
+        Write-Fail "Firewall RT $($rt.Name) has no active spoke return routes"
+    }
+}
+
+Write-Check "Verifying appliance mode on VPC-B TGW attachments"
+$bAttachments = @(aws ec2 describe-transit-gateway-vpc-attachments `
+    --filters "Name=tag:Name,Values=*attach-vpc-b*" `
+    --query "TransitGatewayVpcAttachments[*].{Name:Tags[?Key=='Name']|[0].Value,ID:TransitGatewayAttachmentId,Appliance:Options.ApplianceModeSupport}" `
+    --output json --region $region 2>$null | ConvertFrom-Json)
+foreach ($attach in $bAttachments) {
+    if ($attach.Appliance -eq "enable") {
+        Write-Pass "$($attach.Name) appliance mode: ENABLED"
+    } else {
+        Write-Fail "$($attach.Name) appliance mode: $($attach.Appliance)"
+    }
+}
+if ($bAttachments.Count -ne 2) {
+    Write-Fail "Expected 2 VPC-B TGW attachments, found $($bAttachments.Count)"
 }
 
 # VPC-B untrust route table check
@@ -392,16 +461,43 @@ $naclChecks = @(
         )
     },
     @{
+        Name = "nacl-b-trust"
+        NACLTag = "*b-trust*"
+        Description = "VPC-B trust / TGW attachment subnet NACL"
+        RequiredInbound = @(
+            @{Port=80; CIDR="10.0.0.0/16"; Desc="HTTP transit from VPC-A"}
+        )
+        RequiredOutbound = @(
+            @{Port=80; CIDR="10.2.0.0/16"; Desc="HTTP transit to VPC-C"}
+        )
+    },
+    @{
+        Name = "nacl-c-dmz"
+        NACLTag = "*c-dmz*"
+        Description = "VPC-C TGW attachment subnet NACL"
+        RequiredInbound = @(
+            @{Port=80; CIDR="10.1.2.0/24"; Desc="HTTP from VPC-B trust TGW attachment subnet"},
+            @{Port=443; CIDR="10.1.2.0/24"; Desc="HTTPS from VPC-B trust TGW attachment subnet"}
+        )
+        RequiredOutbound = @(
+            @{Port=80; CIDR="10.2.2.0/24"; Desc="HTTP to C1 portal"},
+            @{Port=1024; CIDR="10.1.2.0/24"; Desc="Ephemeral return to VPC-B trust"}
+        )
+    },
+    @{
         Name = "nacl-c-portal"
         NACLTag = "*c-portal*"
         Description = "C1 portal subnet NACL"
         RequiredInbound = @(
             @{Port=80;  CIDR="10.0.0.0/16"; Desc="HTTP from VPC-A"},
             @{Port=443; CIDR="10.0.0.0/16"; Desc="HTTPS from VPC-A"},
-            @{Port=22;  CIDR="10.0.0.0/16"; Desc="SSH from VPC-A"}
+            @{Port=22;  CIDR="10.0.0.0/16"; Desc="SSH from VPC-A"},
+            @{Port=80;  CIDR="10.1.2.0/24"; Desc="HTTP from VPC-B trust TGW attachment subnet"},
+            @{Port=443; CIDR="10.1.2.0/24"; Desc="HTTPS from VPC-B trust TGW attachment subnet"}
         )
         RequiredOutbound = @(
-            @{Port=1024; CIDR="10.0.0.0/16"; Desc="Ephemeral return to VPC-A"}
+            @{Port=1024; CIDR="10.0.0.0/16"; Desc="Ephemeral return to VPC-A"},
+            @{Port=1024; CIDR="10.1.2.0/24"; Desc="Ephemeral return to VPC-B trust"}
         )
     }
 )
@@ -453,45 +549,56 @@ foreach ($naclCheck in $naclChecks) {
 }
 
 # =============================================================================
-# SECTION 9 — Security Group Spot Checks
+# SECTION 9 — Model 2+3 Security Group Spot Checks
 # =============================================================================
 Write-Header "SECTION 9 — Critical Security Group Rules"
 
-Write-Check "C1 SG allows TCP 443 from VPC-A"
-$c1SgId = aws ec2 describe-instances `
-    --filters "Name=tag:Name,Values=lab-c1-portal" "Name=instance-state-name,Values=running" `
-    --query "Reservations[0].Instances[0].SecurityGroups[0].GroupId" `
-    --output text --region $region 2>$null
+$sgChecks = @(
+    @{InstanceName="lab-c1-portal"; Label="C1 portal"; Required=@(
+        @{Port=80;  CIDR="10.0.0.0/16"; Desc="HTTP from VPC-A"},
+        @{Port=443; CIDR="10.0.0.0/16"; Desc="HTTPS from VPC-A"},
+        @{Port=443; CIDR="10.1.2.0/24"; Desc="HTTPS from VPC-B trust TGW attachment subnet"}
+    )},
+    @{InstanceName="lab-c2-gateway"; Label="C2 gateway"; Required=@(
+        @{Port=443; CIDR="10.0.0.0/16"; Desc="HTTPS from VPC-A"},
+        @{Port=443; CIDR="10.1.2.0/24"; Desc="HTTPS from VPC-B trust TGW attachment subnet"}
+    )},
+    @{InstanceName="lab-c3-controller"; Label="C3 controller"; Required=@(
+        @{Port=443; CIDR="10.0.0.0/16"; Desc="HTTPS from VPC-A"},
+        @{Port=443; CIDR="10.1.2.0/24"; Desc="HTTPS from VPC-B trust TGW attachment subnet"}
+    )}
+)
 
-if ($c1SgId) {
+foreach ($sgCheck in $sgChecks) {
+    Write-Check "$($sgCheck.Label) security group"
+    $sgId = aws ec2 describe-instances `
+        --filters "Name=tag:Name,Values=$($sgCheck.InstanceName)" "Name=instance-state-name,Values=running" `
+        --query "Reservations[0].Instances[0].SecurityGroups[0].GroupId" `
+        --output text --region $region 2>$null
+
+    if (-not $sgId -or $sgId -eq "None") {
+        Write-Fail "$($sgCheck.Label) security group not found"
+        continue
+    }
+
     $rules = aws ec2 describe-security-group-rules `
-        --filters "Name=group-id,Values=$c1SgId" `
+        --filters "Name=group-id,Values=$sgId" `
         --output json --region $region 2>$null | ConvertFrom-Json
 
-    $checks443 = $rules.SecurityGroupRules | Where-Object {
-        $_.IsEgress -eq $false -and
-        $_.IpProtocol -eq "tcp" -and
-        $_.FromPort -le 443 -and
-        $_.ToPort -ge 443 -and
-        $_.CidrIpv4 -eq "10.0.0.0/16"
-    }
-    if ($checks443) {
-        Write-Pass "C1 SG allows TCP 443 from 10.0.0.0/16"
-    } else {
-        Write-Fail "C1 SG MISSING TCP 443 from 10.0.0.0/16"
-    }
+    foreach ($required in $sgCheck.Required) {
+        $found = $rules.SecurityGroupRules | Where-Object {
+            $_.IsEgress -eq $false -and
+            $_.IpProtocol -eq "tcp" -and
+            $_.FromPort -le $required.Port -and
+            $_.ToPort -ge $required.Port -and
+            $_.CidrIpv4 -eq $required.CIDR
+        }
 
-    $checks80 = $rules.SecurityGroupRules | Where-Object {
-        $_.IsEgress -eq $false -and
-        $_.IpProtocol -eq "tcp" -and
-        $_.FromPort -le 80 -and
-        $_.ToPort -ge 80 -and
-        ($_.CidrIpv4 -eq "10.0.0.0/16" -or $_.CidrIpv4 -eq "10.2.1.0/24")
-    }
-    if ($checks80) {
-        Write-Pass "C1 SG allows TCP 80"
-    } else {
-        Write-Fail "C1 SG MISSING TCP 80"
+        if ($found) {
+            Write-Pass "$($sgCheck.Label) allows TCP $($required.Port) from $($required.CIDR) - $($required.Desc)"
+        } else {
+            Write-Fail "$($sgCheck.Label) MISSING TCP $($required.Port) from $($required.CIDR) - $($required.Desc)"
+        }
     }
 }
 

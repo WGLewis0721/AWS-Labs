@@ -1,6 +1,6 @@
 # terraform-aws
 
-This repository contains the working Terraform configuration for the TGW segmentation lab. The current steady-state design is the post-refactor architecture validated on April 4, 2026.
+This repository contains the working Terraform configuration for the TGW segmentation lab. The current steady-state design is the post-refactor architecture plus the Model 2+3 two-table TGW inspection pattern applied on April 7, 2026.
 
 ## Current Architecture
 
@@ -19,13 +19,14 @@ Core components:
   - `c_dmz`, `c_portal`, `c_gateway`, `c_controller`
   - `d`
 - 2 Transit Gateways
-  - `TGW1` - management transit domain
-  - `TGW2` - customer transit domain
+  - `TGW1` - management transit domain with Spoke and Firewall route tables
+  - `TGW2` - customer transit domain with Spoke and Firewall route tables
 - 7 EC2 instances
   - `A1`, `A2`, `B1`, `C1`, `C2`, `C3`, `D1`
 - 1 public customer-entry load balancer in VPC-B untrust
 - per-subnet route tables and per-subnet NACLs
 - centralized internet egress through the NAT Gateway in VPC-A
+- VPC-B inspection attachments on both TGWs with appliance mode enabled
 
 ## Topology
 
@@ -41,6 +42,8 @@ Internet
 
 TGW1
   |
+  +-- Spoke RT: VPC-A and VPC-C; default route to VPC-B
+  +-- Firewall RT: VPC-B; return routes to VPC-A and VPC-C
   +-- VPC-A 10.0.0.0/16
   +-- VPC-B 10.1.0.0/16
   |     B1 mgmt:   10.1.3.10
@@ -53,6 +56,8 @@ TGW1
 
 TGW2
   |
+  +-- Spoke RT: VPC-C and VPC-D; default route to VPC-B
+  +-- Firewall RT: VPC-B; return routes to VPC-B, VPC-C, and VPC-D
   +-- VPC-B 10.1.0.0/16
   +-- VPC-C 10.2.0.0/16
   +-- VPC-D 10.3.0.0/16
@@ -72,12 +77,15 @@ This is the current operator model. Future docs and prompts should assume this u
 - `C1` can initiate SSH and HTTPS to `B1` mgmt and HTTPS to `D1`
 - `D1` can initiate HTTPS to `C1`
 - `D1` is intentionally isolated from VPC-A
+- Model 2+3 TGW route tables force spoke traffic through VPC-B inspection
+- inter-VPC traffic reaches destination NACLs/SGs from the VPC-B TGW attachment subnet `10.1.2.0/24`
 
 Important current-state facts:
 
 - Operator validation uses direct private-IP targets. There are no separate internal validation load balancers in the design.
 - Route 53 is not used for this lab beyond the AWS-managed default VPC resolver. There are no custom hosted zones or custom Resolver endpoints.
 - The output name `alb_dns_name` is kept for compatibility and refers to the public customer-entry load balancer DNS name.
+- B1 OS-level `tcpdump` is not proof of TGW transit visibility. TGW uses AWS-managed attachment ENIs in `10.1.2.0/24`.
 
 ## Instance Inventory
 
@@ -136,7 +144,8 @@ Deployment phases:
 5. Security layer targeted apply
 6. Compute layer targeted apply
 7. Full convergence apply
-8. Post-deploy bootstrap and verification
+8. Two-table TGW pattern verification
+9. Post-deploy bootstrap and verification
 
 What the deploy script does:
 
@@ -149,6 +158,7 @@ What the deploy script does:
 - creates golden AMIs if they do not already exist
 - writes `generated.instance-amis.auto.tfvars.json` into `terraform-aws/environments/dev/`
 - applies Terraform in phases to reduce blast radius and improve troubleshooting
+- verifies Spoke/Firewall TGW route tables and VPC-B appliance mode after full convergence
 - copies the key to `A2`
 - bootstraps nginx and TLS on the Linux web nodes through `A2` using the S3-hosted RPM bundle
 - runs SSM-backed netchecks and stores results in S3
@@ -238,7 +248,7 @@ curl -sk https://10.2.2.10
 Expected:
 
 - `200` from `C1` HTTPS
-- Reachability Analyzer can still report a false-positive SG mismatch on the `D1 -> C1` path after `source_dest_check` is disabled on the endpoint instances
+- Reachability Analyzer can still report a false negative on multi-hop TGW inspection paths because it does not model TGW source-IP substitution to the attachment subnet. Prefer actual curl results plus TGW route table, NACL, SG, and appliance-mode checks.
 
 ### SSM netchecks
 
@@ -269,7 +279,28 @@ The deploy script also stores SSM command output under:
 
 These items are codified in Terraform and should remain true unless the architecture is intentionally changed.
 
-### 1. Per-subnet route tables and NACLs are required
+### 1. Model 2+3 uses Spoke and Firewall TGW route tables
+
+Each TGW uses two active inspection route tables:
+
+- Spoke RT: associated with spoke VPCs and has `0.0.0.0/0 -> VPC-B`
+- Firewall RT: associated with VPC-B and has specific routes back to the spokes
+
+TGW1 Spoke RT is associated with VPC-A and VPC-C. TGW1 Firewall RT is associated with VPC-B.
+
+TGW2 Spoke RT is associated with VPC-C and VPC-D. TGW2 Firewall RT is associated with VPC-B.
+
+VPC-B attachments on both TGWs must keep appliance mode enabled.
+
+### 2. Model 2+3 changes the source CIDR seen by destination controls
+
+After traffic is forced through the inspection path, destination NACLs and SGs must allow the VPC-B TGW attachment subnet:
+
+- `10.1.2.0/24`
+
+This is why the C1/C2/C3 security groups include HTTPS ingress from `10.1.2.0/24` and the C-side NACLs include additional rules for that source.
+
+### 3. Per-subnet route tables and NACLs are required
 
 The stable design is per-subnet, not per-VPC. Future changes should preserve:
 
@@ -278,7 +309,7 @@ The stable design is per-subnet, not per-VPC. Future changes should preserve:
 - explicit TGW associations
 - explicit TGW route entries
 
-### 2. `lab-rt-b-untrust` needs explicit return routes
+### 4. `lab-rt-b-untrust` needs explicit return routes
 
 The B1 untrust subnet must keep:
 
@@ -289,7 +320,7 @@ The B1 untrust subnet must keep:
 
 Without those return routes, ping may work while TCP fails.
 
-### 3. VPC-C route tables need default egress through `TGW1` and a VPC-D route through `TGW2`
+### 5. VPC-C route tables need default egress through `TGW1` and a VPC-D route through `TGW2`
 
 The VPC-C subnets use centralized egress:
 
@@ -298,7 +329,7 @@ The VPC-C subnets use centralized egress:
 
 That is required for package installation, updates, and bootstrap resilience.
 
-### 4. `nacl-a` needs the service-port return path
+### 6. `nacl-a` needs the service-port return path
 
 Because `A2` and the TGW attachment share the VPC-A subnet, `nacl-a` must retain:
 
@@ -307,15 +338,18 @@ Because `A2` and the TGW attachment share the VPC-A subnet, `nacl-a` must retain
 - ingress `113` tcp `8443` from `10.0.0.0/16`
 - egress `125` tcp `80` to `10.2.0.0/16`
 
-### 5. `nacl-c-dmz` needs rule `96`
+### 7. `nacl-c-dmz` needs Model 2+3 transit rules
 
-The VPC-C DMZ subnet must keep:
+The VPC-C DMZ subnet must keep at least:
 
 - egress `96` tcp `80` to `10.2.2.0/24`
+- ingress `99` tcp `80` from `10.1.2.0/24`
+- ingress `100` tcp `443` from `10.1.2.0/24`
+- egress `110` tcp `1024-65535` to `10.1.2.0/24`
 
-That rule is part of the working A2/A1 -> C1 HTTP path.
+Those rules are part of the inspected A2/A1 -> C1 path.
 
-### 6. C1 bootstrap is more sensitive than the other Linux nodes
+### 8. C1 bootstrap is more sensitive than the other Linux nodes
 
 `C1` needs full nginx configuration with TLS, not just a placeholder listener.
 
@@ -327,7 +361,7 @@ Required behavior:
 - write `/etc/nginx/conf.d/ssl.conf`
 - enable and restart nginx
 
-### 7. `C1` and `D1` keep `source_dest_check = false`
+### 9. `C1` and `D1` keep `source_dest_check = false`
 
 The validated east-west model requires:
 
@@ -336,7 +370,7 @@ The validated east-west model requires:
 
 If those drift back to `true`, Reachability Analyzer and cross-VPC forwarding behavior will regress.
 
-### 8. The deploy script is the canonical convergence workflow
+### 10. The deploy script is the canonical convergence workflow
 
 The repo is now designed around:
 

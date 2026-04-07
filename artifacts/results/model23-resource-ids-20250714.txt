@@ -1,0 +1,20 @@
+# Model 2+3 Resource IDs — 2025-07-14
+# Handoff file between parts. Load these before starting Part 2.
+
+TGW1_ID=tgw-0182ba880fd0f5577
+TGW2_ID=tgw-07ee4fdc98c23dcaa
+
+TGW1_OLD_RT=tgw-rtb-0b487c42bb70dda85
+TGW2_OLD_RT=tgw-rtb-0d5498b601c8d1c96
+
+TGW1_SPOKE_RT=tgw-rtb-048b1f202b58aa953
+TGW1_FW_RT=tgw-rtb-0b4ef7ed52e24e8fb
+TGW2_SPOKE_RT=tgw-rtb-08aff34bbf46e3e04
+TGW2_FW_RT=tgw-rtb-064e2f1575529422b
+
+ATTACH_TGW1_A=tgw-attach-0add575b2d88438f6
+ATTACH_TGW1_B=tgw-attach-066fd221541a5125a
+ATTACH_TGW1_C=tgw-attach-0fba819a08552a4cb
+ATTACH_TGW2_B=tgw-attach-08c236efde613922b
+ATTACH_TGW2_C=tgw-attach-0989e560b674e039c
+ATTACH_TGW2_D=tgw-attach-002e2a419574cdc3c

@@ -7,11 +7,16 @@ used during deployment, validation, and troubleshooting.
 
 - `deploy.ps1`
   - Canonical local staged deployment entrypoint for the lab.
-  - Seeds bootstrap assets to S3, ensures golden AMIs exist, runs phased Terraform applies, reattaches diagnostic IAM profiles, bootstraps nginx through A2, and runs SSM netchecks.
+  - Seeds bootstrap assets to S3, ensures golden AMIs exist, runs phased Terraform applies, verifies the Model 2+3 two-table TGW pattern, reattaches diagnostic IAM profiles, bootstraps nginx through A2, and runs SSM netchecks.
 
 - `netcheck.sh`
-  - Canonical A2 validation script for the simplified direct-access lab.
+  - Canonical A2 validation script for the Model 2+3 direct-access lab.
   - Validates A2 -> B1/C1/C2/C3 and confirms A2 -X-> D1 isolation.
+  - Verifies Spoke/Firewall TGW route tables, VPC-B appliance mode, and Model 2+3 NACL rules when AWS CLI permissions allow.
+
+- `local-netcheck.ps1`
+  - Operator-laptop validation script using AWS CLI plus SSH through A2.
+  - Verifies Model 2+3 TGW route tables, appliance mode, NACLs, SG transit rules from `10.1.2.0/24`, and direct private-IP reachability.
 
 - `netcheck-a2.sh`
   - Convenience wrapper for the canonical A2 shell script.
@@ -135,3 +140,10 @@ These files are point-in-time AWS CLI captures collected during troubleshooting:
 Treat these as supporting evidence, not as current source of truth. The
 Terraform configuration and the most recent report in `artifacts/results`
 are the authoritative references for the live lab design.
+
+## Model 2+3 Validation Notes
+
+- The active inspection design uses Spoke and Firewall TGW route tables on both TGWs.
+- VPC-B TGW attachments must have appliance mode enabled.
+- Inter-VPC traffic reaches destination SGs/NACLs from the TGW attachment subnet `10.1.2.0/24`, not always from the original source VPC CIDR.
+- Do not use B1 OS-level `tcpdump` as proof of TGW transit visibility; TGW uses AWS-managed attachment ENIs.

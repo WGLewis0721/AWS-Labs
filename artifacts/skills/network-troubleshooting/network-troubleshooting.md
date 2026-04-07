@@ -55,6 +55,9 @@ TGW2
 - the public customer-entry load balancer remains separate from the operator path
 - no internal load balancers remain
 - no custom Route 53 resources are involved
+- Model 2+3 two-table TGW routing is active: spoke traffic is forced through VPC-B inspection route tables
+- VPC-B TGW attachments have appliance mode enabled
+- destination NACLs and SGs account for TGW attachment subnet source traffic from `10.1.2.0/24`
 
 ## First Step
 
@@ -81,8 +84,9 @@ Can A2 reach 10.1.3.10 / 10.2.2.10 / 10.2.3.10 / 10.2.4.10 directly?
 |
 +-- NO
 |   +-- Check the exact subnet route table first
-|   +-- Check nacl-a and the destination subnet path
-|   +-- Check the destination security group
+|   +-- For Model 2+3, check spoke/firewall TGW route table associations
+|   +-- Check nacl-a, nacl-b-trust, nacl-c-dmz, and the destination subnet path
+|   +-- Check destination security groups for `10.1.2.0/24` transit ingress
 |   +-- Use Reachability Analyzer if the basic controls still look right
 |   +-- If the path is open, inspect the instance service
 |
@@ -137,6 +141,28 @@ Critical expectations:
 - `lab-rt-b-untrust` has return routes to VPC-A, VPC-C, and VPC-D
 - VPC-C route tables have `0.0.0.0/0 -> TGW1`
 - VPC-A has routes to VPC-B and VPC-C, but not to VPC-D
+- Model 2+3 Spoke RTs have `0.0.0.0/0 -> VPC-B`
+- Model 2+3 Firewall RTs are associated with VPC-B and route back to the spokes
+
+Model 2+3 TGW route table checks:
+
+```bash
+aws ec2 describe-transit-gateway-route-tables \
+  --filters "Name=tag:Role,Values=spoke,firewall" \
+  --output json \
+  --region us-east-1
+
+aws ec2 get-transit-gateway-route-table-associations \
+  --transit-gateway-route-table-id <rt-id> \
+  --output json \
+  --region us-east-1
+
+aws ec2 search-transit-gateway-routes \
+  --transit-gateway-route-table-id <rt-id> \
+  --filters "Name=state,Values=active" \
+  --output json \
+  --region us-east-1
+```
 
 ### Tool 3: NACL Checks
 
@@ -148,7 +174,16 @@ Critical current rules:
   - ingress `113` tcp `8443`
   - egress `125` tcp `80`
 - `nacl-c-dmz`
+  - ingress `99` tcp `80` from `10.1.2.0/24`
+  - ingress `100` tcp `443` from `10.1.2.0/24`
   - egress `96` tcp `80` to `10.2.2.0/24`
+- `nacl-b-trust`
+  - ingress `92` tcp `80` from `10.0.0.0/16`
+  - egress `101` tcp `80` to `10.2.0.0/16`
+- `nacl-c-portal`
+  - ingress `93` tcp `80` from `10.1.2.0/24`
+  - ingress `94` tcp `443` from `10.1.2.0/24`
+  - egress `89` tcp `1024-65535` to `10.1.2.0/24`
 
 Inspect with:
 
@@ -177,6 +212,8 @@ Expected inbound examples:
   - `443` from `10.0.0.0/16`
 - `C1`:
   - `22`, `80`, `443` from `10.0.0.0/16`
+- `C1`, `C2`, and `C3` after Model 2+3:
+  - `443` from `10.1.2.0/24`
 
 ### Tool 5: Reachability Analyzer
 
@@ -229,7 +266,36 @@ Prefer these before long manual sessions:
 
 The script payloads and output capture paths are already standardized in the repo and in S3.
 
+### Tool 9: Two-Table TGW Pattern Verifier
+
+Use this after Model 2+3 deployment or when a path looks asymmetric.
+
+Checks:
+
+- Spoke RTs exist for TGW1 and TGW2.
+- Firewall RTs exist for TGW1 and TGW2.
+- Spoke VPCs are associated with Spoke RTs.
+- VPC-B is associated with Firewall RTs.
+- Spoke RT default routes point to VPC-B attachments.
+- Firewall RTs have routes back to the spoke VPC CIDRs.
+- VPC-B TGW attachments have appliance mode enabled.
+- Actual traffic stability: 10 consecutive `curl -sk https://10.2.2.10` requests from A2 return `200`.
+
+Do not use `tcpdump` on B1 as proof of transit visibility. TGW uses AWS-managed attachment ENIs in `10.1.2.0/24`; B1 can show zero packets even when the inspected path is healthy.
+
 ## Known Lessons
+
+### 2026-04-07 - Model 2+3 Terraform-applied steady state
+
+- Model 2+3 route tables, routes, associations, NACL rules, and SG rules are now Terraform-managed.
+- The post-apply Terraform plan returned no changes.
+- Teardown should let Terraform remove managed TGW route tables/routes/associations. Do not manually delete those resources first unless state management changes.
+
+### 2025-07-14 - Model 2+3 tcpdump and Reachability Analyzer limits
+
+- B1 tcpdump is not a valid proof of TGW transit visibility because TGW traffic uses AWS-managed attachment ENIs.
+- Reachability Analyzer can false-negative multi-hop TGW inspection paths because it does not model TGW source-IP substitution to the attachment subnet.
+- Prefer actual curl results plus TGW route table, NACL, SG, and appliance-mode checks.
 
 ### 2026-04-04 - Direct private-IP model
 

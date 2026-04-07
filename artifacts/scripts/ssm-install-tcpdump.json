@@ -1,0 +1,7 @@
+{
+  "commands": [
+    "aws s3 cp s3://terraform-lab-wgl/tools/tcpdump-4.99.1-1.amzn2023.0.2.x86_64.rpm /tmp/ --region us-east-1",
+    "sudo rpm -ivh /tmp/tcpdump-4.99.1-1.amzn2023.0.2.x86_64.rpm",
+    "tcpdump --version"
+  ]
+}

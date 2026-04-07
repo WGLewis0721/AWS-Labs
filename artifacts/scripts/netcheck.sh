@@ -2,7 +2,7 @@
 # ============================================================================
 # TGW Segmentation Lab - Network Diagnostic Script
 # Run from: A2 Linux (10.0.1.20) in VPC-A
-# Purpose: Validate the simplified direct-access lab design after NLB removal
+# Purpose: Validate the Model 2+3 direct-access lab design after NLB removal
 # Usage:   KEY_PATH=~/tgw-lab-key.pem bash ~/netcheck.sh
 # Optional: REPORT_FILE=/tmp/custom-report.txt
 # ============================================================================
@@ -308,29 +308,97 @@ else
     fi
 
     divider
-    log "Checking TGW1 route for 10.2.0.0/16"
-    TGW1_RT="$(aws_cmd ec2 describe-transit-gateway-route-tables \
-        --filters "Name=tag:Name,Values=tgw1*" \
-        --query 'TransitGatewayRouteTables[0].TransitGatewayRouteTableId' \
+    log "Checking Model 2+3 TGW two-table pattern"
+    VPC_B_ID="$(aws_cmd ec2 describe-vpcs \
+        --filters "Name=tag:Name,Values=*vpc-b*" \
+        --query 'Vpcs[0].VpcId' \
         --output text)"
-    if [ -n "$TGW1_RT" ] && [ "$TGW1_RT" != "AWS_ERROR" ] && [ "$TGW1_RT" != "AWS_NOT_INSTALLED" ] && [ "$TGW1_RT" != "None" ]; then
-        info "TGW1 route table: $TGW1_RT"
-        TGW1_ROUTE="$(aws_cmd ec2 search-transit-gateway-routes \
-            --transit-gateway-route-table-id "$TGW1_RT" \
-            --filters "Name=state,Values=active" \
-            --query 'Routes[?DestinationCidrBlock==`10.2.0.0/16`].State' \
-            --output text)"
-        if [ "$TGW1_ROUTE" = "active" ]; then
-            pass "TGW1 has an active route to 10.2.0.0/16"
-        elif [ -z "$TGW1_ROUTE" ] || [ "$TGW1_ROUTE" = "AWS_ERROR" ] || [ "$TGW1_ROUTE" = "None" ]; then
-            warn "Could not verify TGW1 route from the A2 instance role"
-            info "This role does not have ec2:SearchTransitGatewayRoutes in the current lab policy"
-            info "Direct C-path success and the VPC-A route-table check already confirm working routing"
-        else
-            fail "TGW1 is missing an active route to 10.2.0.0/16"
-        fi
+    SPOKE_RTS="$(aws_cmd ec2 describe-transit-gateway-route-tables \
+        --filters "Name=tag:Role,Values=spoke" \
+        --query 'TransitGatewayRouteTables[?State==`available`].TransitGatewayRouteTableId' \
+        --output text)"
+    FIREWALL_RTS="$(aws_cmd ec2 describe-transit-gateway-route-tables \
+        --filters "Name=tag:Role,Values=firewall" \
+        --query 'TransitGatewayRouteTables[?State==`available`].TransitGatewayRouteTableId' \
+        --output text)"
+
+    SPOKE_COUNT="$(printf "%s\n" $SPOKE_RTS 2>/dev/null | wc -w | tr -d ' ')"
+    FIREWALL_COUNT="$(printf "%s\n" $FIREWALL_RTS 2>/dev/null | wc -w | tr -d ' ')"
+
+    if [ "$SPOKE_COUNT" -eq 2 ]; then
+        pass "Found both Spoke RTs: $SPOKE_RTS"
     else
-        warn "Could not retrieve TGW1 route table"
+        fail "Expected 2 Spoke RTs, found $SPOKE_COUNT: $SPOKE_RTS"
+    fi
+
+    if [ "$FIREWALL_COUNT" -eq 2 ]; then
+        pass "Found both Firewall RTs: $FIREWALL_RTS"
+    else
+        fail "Expected 2 Firewall RTs, found $FIREWALL_COUNT: $FIREWALL_RTS"
+    fi
+
+    if [ -n "$VPC_B_ID" ] && [ "$VPC_B_ID" != "AWS_ERROR" ] && [ "$VPC_B_ID" != "None" ]; then
+        info "VPC-B ID: $VPC_B_ID"
+        for rt_id in $SPOKE_RTS; do
+            DEFAULT_TARGETS="$(aws_cmd ec2 search-transit-gateway-routes \
+                --transit-gateway-route-table-id "$rt_id" \
+                --filters "Name=state,Values=active" \
+                --query 'Routes[?DestinationCidrBlock==`0.0.0.0/0`].TransitGatewayAttachments[*].ResourceId' \
+                --output text)"
+            if echo "$DEFAULT_TARGETS" | grep -q "$VPC_B_ID"; then
+                pass "Spoke RT $rt_id default route points to VPC-B"
+            elif [ "$DEFAULT_TARGETS" = "AWS_ERROR" ] || [ "$DEFAULT_TARGETS" = "None" ]; then
+                warn "Could not verify Spoke RT $rt_id default route from this role"
+                info "If this is A2 IAM-limited, run the same check from the operator laptop"
+            else
+                fail "Spoke RT $rt_id default route does not point to VPC-B: $DEFAULT_TARGETS"
+            fi
+        done
+
+        for rt_id in $FIREWALL_RTS; do
+            FIREWALL_ASSOCS="$(aws_cmd ec2 get-transit-gateway-route-table-associations \
+                --transit-gateway-route-table-id "$rt_id" \
+                --query 'Associations[?State==`associated`].ResourceId' \
+                --output text)"
+            if echo "$FIREWALL_ASSOCS" | grep -q "$VPC_B_ID"; then
+                pass "Firewall RT $rt_id is associated with VPC-B"
+            elif [ "$FIREWALL_ASSOCS" = "AWS_ERROR" ] || [ "$FIREWALL_ASSOCS" = "None" ]; then
+                warn "Could not verify Firewall RT $rt_id associations from this role"
+            else
+                fail "Firewall RT $rt_id is not associated with VPC-B: $FIREWALL_ASSOCS"
+            fi
+
+            FIREWALL_ROUTES="$(aws_cmd ec2 search-transit-gateway-routes \
+                --transit-gateway-route-table-id "$rt_id" \
+                --filters "Name=state,Values=active" \
+                --query 'Routes[?State==`active`].DestinationCidrBlock' \
+                --output text)"
+            if echo "$FIREWALL_ROUTES" | grep -q "10\."; then
+                pass "Firewall RT $rt_id has active spoke return routes: $FIREWALL_ROUTES"
+            elif [ "$FIREWALL_ROUTES" = "AWS_ERROR" ] || [ "$FIREWALL_ROUTES" = "None" ]; then
+                warn "Could not verify Firewall RT $rt_id routes from this role"
+            else
+                fail "Firewall RT $rt_id has no active spoke return routes"
+            fi
+        done
+    else
+        warn "Could not retrieve VPC-B ID for Model 2+3 route validation"
+    fi
+
+    divider
+    log "Checking appliance mode on VPC-B TGW attachments"
+    B_ATTACHMENTS="$(aws_cmd ec2 describe-transit-gateway-vpc-attachments \
+        --filters "Name=tag:Name,Values=*attach-vpc-b*" \
+        --query 'TransitGatewayVpcAttachments[*].[TransitGatewayAttachmentId,Options.ApplianceModeSupport]' \
+        --output text)"
+    B_ATTACHMENT_COUNT="$(printf "%s\n" "$B_ATTACHMENTS" | awk 'NF { count++ } END { print count + 0 }')"
+    DISABLED_ATTACHMENTS="$(printf "%s\n" "$B_ATTACHMENTS" | awk 'NF && $NF != "enable" { print }')"
+    if [ "$B_ATTACHMENT_COUNT" -eq 2 ] && [ -z "$DISABLED_ATTACHMENTS" ]; then
+        pass "Appliance mode is enabled on both VPC-B attachments"
+    elif [ "$B_ATTACHMENTS" = "AWS_ERROR" ] || [ "$B_ATTACHMENTS" = "None" ]; then
+        warn "Could not verify appliance mode from this role"
+    else
+        fail "Appliance mode is not enabled on all VPC-B attachments: $B_ATTACHMENTS"
     fi
 
     divider
@@ -355,7 +423,7 @@ else
     fi
 
     divider
-    log "Checking critical VPC-A NACL rules for direct VPC-C access"
+    log "Checking critical NACL rules for Model 2+3 access"
     NACL_A_RULES="$(aws_cmd ec2 describe-network-acls \
         --filters "Name=tag:Name,Values=*nacl*a*" \
         --query 'NetworkAcls[0].Entries[*].{Rule:RuleNumber,Egress:Egress,CIDR:CidrBlock,From:PortRange.From,To:PortRange.To,Action:RuleAction}' \
@@ -370,20 +438,73 @@ else
     fi
 
     divider
-    log "Checking c-dmz NACL rule allowing HTTP to c-portal"
+    log "Checking b-trust NACL rules for Model 2+3 transit"
+    NACL_B_TRUST_RULES="$(aws_cmd ec2 describe-network-acls \
+        --filters "Name=tag:Name,Values=*b-trust*" \
+        --query 'NetworkAcls[0].Entries[*].{Rule:RuleNumber,Egress:Egress,CIDR:CidrBlock,From:PortRange.From,To:PortRange.To,Action:RuleAction}' \
+        --output json)"
+    if echo "$NACL_B_TRUST_RULES" | grep -q '"Rule": 92' && \
+       echo "$NACL_B_TRUST_RULES" | grep -q '"Rule": 101'; then
+        pass "b-trust NACL includes transit rules 92 and 101"
+    else
+        fail "b-trust NACL is missing Model 2+3 transit rules 92 and/or 101"
+    fi
+
+    divider
+    log "Checking c-dmz NACL rules for Model 2+3 transit"
     NACL_C_DMZ_RULES="$(aws_cmd ec2 describe-network-acls \
         --filters "Name=tag:Name,Values=*c-dmz*" \
         --query 'NetworkAcls[0].Entries[*].{Rule:RuleNumber,Egress:Egress,CIDR:CidrBlock,From:PortRange.From,To:PortRange.To,Action:RuleAction}' \
         --output json)"
-    if echo "$NACL_C_DMZ_RULES" | grep -q '"Rule": 96'; then
-        pass "c-dmz NACL includes rule 96 for HTTP to c-portal"
+    if echo "$NACL_C_DMZ_RULES" | grep -q '"Rule": 96' && \
+       echo "$NACL_C_DMZ_RULES" | grep -q '"Rule": 99' && \
+       echo "$NACL_C_DMZ_RULES" | grep -q '"Rule": 100' && \
+       echo "$NACL_C_DMZ_RULES" | grep -q '"Rule": 110'; then
+        pass "c-dmz NACL includes Model 2+3 rules 96, 99, 100, and 110"
     else
-        fail "c-dmz NACL is missing rule 96 for HTTP to c-portal"
+        fail "c-dmz NACL is missing one or more Model 2+3 rules (96/99/100/110)"
+    fi
+
+    divider
+    log "Checking c-portal NACL rules for Model 2+3 transit"
+    NACL_C_PORTAL_RULES="$(aws_cmd ec2 describe-network-acls \
+        --filters "Name=tag:Name,Values=*c-portal*" \
+        --query 'NetworkAcls[0].Entries[*].{Rule:RuleNumber,Egress:Egress,CIDR:CidrBlock,From:PortRange.From,To:PortRange.To,Action:RuleAction}' \
+        --output json)"
+    if echo "$NACL_C_PORTAL_RULES" | grep -q '"Rule": 89' && \
+       echo "$NACL_C_PORTAL_RULES" | grep -q '"Rule": 93' && \
+       echo "$NACL_C_PORTAL_RULES" | grep -q '"Rule": 94'; then
+        pass "c-portal NACL includes Model 2+3 rules 89, 93, and 94"
+    else
+        fail "c-portal NACL is missing one or more Model 2+3 rules (89/93/94)"
     fi
 fi
 divider
 
-header "SECTION 7 - Diagnostic Summary"
+header "SECTION 7 - Model 2+3 Path Stability"
+
+log "Running 10 consecutive HTTPS requests to C1"
+PASS_COUNT=0
+FAIL_COUNT=0
+for i in $(seq 1 10); do
+    CODE="$(curl -sk --connect-timeout 5 --max-time 10 "https://$IP_C1_PORTAL" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")"
+    if [ "$CODE" = "200" ]; then
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        warn "Request $i returned $CODE"
+    fi
+done
+
+if [ "$FAIL_COUNT" -eq 0 ]; then
+    pass "Model 2+3 stability: 10/10 HTTPS requests to C1 succeeded"
+else
+    fail "Model 2+3 stability: $FAIL_COUNT/10 HTTPS requests to C1 failed"
+    info "Check VPC-B attachment appliance mode, Spoke RT defaults, and destination rules from 10.1.2.0/24"
+fi
+divider
+
+header "SECTION 8 - Diagnostic Summary"
 
 echo "" | tee -a "$REPORT_FILE"
 echo -e "${BOLD}Full report saved to: $REPORT_FILE${NC}" | tee -a "$REPORT_FILE"
@@ -396,6 +517,7 @@ echo "  - C2 works on 10.2.3.10 (HTTPS, SSH)" | tee -a "$REPORT_FILE"
 echo "  - C3 works on 10.2.4.10 (HTTPS, SSH)" | tee -a "$REPORT_FILE"
 echo "  - D1 remains unreachable from A2" | tee -a "$REPORT_FILE"
 echo "  - No internal NLB-B or NLB-C load balancers remain" | tee -a "$REPORT_FILE"
+echo "  - Model 2+3 Spoke/Firewall TGW route tables are present and appliance mode is enabled" | tee -a "$REPORT_FILE"
 echo "" | tee -a "$REPORT_FILE"
 echo -e "${CYAN}Copy report to your laptop:${NC}" | tee -a "$REPORT_FILE"
 echo "  scp -i tgw-lab-key.pem ec2-user@<A2_IP>:$REPORT_FILE ." | tee -a "$REPORT_FILE"

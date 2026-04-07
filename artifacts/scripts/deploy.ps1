@@ -705,6 +705,140 @@ function Invoke-TerraformPhase {
   Write-Pass "$PhaseName completed"
 }
 
+function Test-TwoTableTgwPattern {
+  Write-Header "PHASE 6B - Two-Table TGW Pattern Verification"
+
+  $failed = $false
+
+  $spokeRTsResult = Get-AwsJson -Arguments @(
+    "ec2", "describe-transit-gateway-route-tables",
+    "--filters", "Name=tag:Role,Values=spoke",
+    "--query", "TransitGatewayRouteTables[*].{Name:Tags[?Key=='Name']|[0].Value,Id:TransitGatewayRouteTableId,State:State}",
+    "--output", "json",
+    "--region", $Region
+  )
+  $spokeRTs = @()
+  if ($spokeRTsResult) {
+    $spokeRTs = @($spokeRTsResult)
+  }
+
+  $firewallRTsResult = Get-AwsJson -Arguments @(
+    "ec2", "describe-transit-gateway-route-tables",
+    "--filters", "Name=tag:Role,Values=firewall",
+    "--query", "TransitGatewayRouteTables[*].{Name:Tags[?Key=='Name']|[0].Value,Id:TransitGatewayRouteTableId,State:State}",
+    "--output", "json",
+    "--region", $Region
+  )
+  $firewallRTs = @()
+  if ($firewallRTsResult) {
+    $firewallRTs = @($firewallRTsResult)
+  }
+
+  $vpcBId = Get-AwsText -Arguments @(
+    "ec2", "describe-vpcs",
+    "--filters", "Name=tag:Name,Values=*vpc-b*",
+    "--query", "Vpcs[0].VpcId",
+    "--output", "text",
+    "--region", $Region
+  )
+
+  if ($spokeRTs.Count -eq 2) {
+    Write-Pass "Both Spoke RTs exist ($($spokeRTs.Id -join ', '))"
+  }
+  else {
+    Write-Fail "Expected 2 Spoke RTs, found $($spokeRTs.Count)"
+    $failed = $true
+  }
+
+  if ($firewallRTs.Count -eq 2) {
+    Write-Pass "Both Firewall RTs exist ($($firewallRTs.Id -join ', '))"
+  }
+  else {
+    Write-Fail "Expected 2 Firewall RTs, found $($firewallRTs.Count)"
+    $failed = $true
+  }
+
+  foreach ($rt in $spokeRTs) {
+    $defaultTargets = Get-AwsText -Arguments @(
+      "ec2", "search-transit-gateway-routes",
+      "--transit-gateway-route-table-id", $rt.Id,
+      "--filters", "Name=state,Values=active",
+      "--query", "Routes[?DestinationCidrBlock=='0.0.0.0/0'].TransitGatewayAttachments[*].ResourceId",
+      "--output", "text",
+      "--region", $Region
+    )
+
+    if ($vpcBId -and $defaultTargets -and $defaultTargets -match [regex]::Escape($vpcBId)) {
+      Write-Pass "Spoke RT $($rt.Name) default route points to VPC-B"
+    }
+    else {
+      Write-Fail "Spoke RT $($rt.Name) default route does not point to VPC-B"
+      $failed = $true
+    }
+  }
+
+  foreach ($rt in $firewallRTs) {
+    $associations = Get-AwsJson -Arguments @(
+      "ec2", "get-transit-gateway-route-table-associations",
+      "--transit-gateway-route-table-id", $rt.Id,
+      "--output", "json",
+      "--region", $Region
+    )
+    $vpcBAssociation = @()
+    if ($associations -and $associations.Associations) {
+      $vpcBAssociation = @($associations.Associations | Where-Object { $_.ResourceId -eq $vpcBId -and $_.State -eq "associated" })
+    }
+
+    if ($vpcBAssociation.Count -gt 0) {
+      Write-Pass "Firewall RT $($rt.Name) is associated with VPC-B"
+    }
+    else {
+      Write-Fail "Firewall RT $($rt.Name) is not associated with VPC-B"
+      $failed = $true
+    }
+
+    $routeCidrs = Get-AwsText -Arguments @(
+      "ec2", "search-transit-gateway-routes",
+      "--transit-gateway-route-table-id", $rt.Id,
+      "--filters", "Name=state,Values=active",
+      "--query", "Routes[?State=='active'].DestinationCidrBlock",
+      "--output", "text",
+      "--region", $Region
+    )
+    if ($routeCidrs -and $routeCidrs -match "10\.") {
+      Write-Pass "Firewall RT $($rt.Name) has active spoke return routes"
+    }
+    else {
+      Write-Fail "Firewall RT $($rt.Name) has no active spoke return routes"
+      $failed = $true
+    }
+  }
+
+  $bAttachmentsResult = Get-AwsJson -Arguments @(
+    "ec2", "describe-transit-gateway-vpc-attachments",
+    "--filters", "Name=tag:Name,Values=*attach-vpc-b*",
+    "--query", "TransitGatewayVpcAttachments[*].{Name:Tags[?Key=='Name']|[0].Value,Id:TransitGatewayAttachmentId,Appliance:Options.ApplianceModeSupport}",
+    "--output", "json",
+    "--region", $Region
+  )
+  $bAttachments = @()
+  if ($bAttachmentsResult) {
+    $bAttachments = @($bAttachmentsResult)
+  }
+  $notEnabled = @($bAttachments | Where-Object { $_.Appliance -ne "enable" })
+  if ($bAttachments.Count -eq 2 -and $notEnabled.Count -eq 0) {
+    Write-Pass "Appliance mode enabled on both VPC-B attachments"
+  }
+  else {
+    Write-Fail "Appliance mode is not enabled on all VPC-B attachments"
+    $failed = $true
+  }
+
+  if ($failed) {
+    throw "Two-table TGW pattern verification failed."
+  }
+}
+
 function Wait-ForInstanceStatusChecks {
   param([int]$TimeoutSeconds = 600)
 
@@ -932,6 +1066,7 @@ Deployment phases:
   Phase 4 - Security layer
   Phase 5 - Compute layer
   Phase 6 - Full convergence
+  Phase 6B - Two-table TGW pattern verification
   Phase 7 - Post-deploy bootstrap and verification
 "@
 
@@ -1005,6 +1140,8 @@ Invoke-TerraformPhase -PhaseName "PHASE 3 - Network foundation" -Targets @("modu
 Invoke-TerraformPhase -PhaseName "PHASE 4 - Security layer" -Targets @("module.security")
 Invoke-TerraformPhase -PhaseName "PHASE 5 - Compute layer" -Targets @("module.compute")
 Invoke-TerraformPhase -PhaseName "PHASE 6 - Full convergence"
+
+Test-TwoTableTgwPattern
 
 Write-Header "PHASE 7 - Post-deploy bootstrap and verification"
 

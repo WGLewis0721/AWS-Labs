@@ -120,6 +120,71 @@ Important nuance:
 - The A2 diagnostic role may not always include `ec2:SearchTransitGatewayRoutes`.
 - If `search-transit-gateway-routes` fails on A2, treat that first as an IAM limitation, not automatic proof of a broken TGW route.
 
+## Model 2+3 Two-Table TGW Validation
+
+Current state:
+
+- Model 2+3 two-table TGW routing is active and Terraform-applied as of 2026-04-07.
+- Each TGW has a Spoke RT (`Role=spoke`) and Firewall RT (`Role=firewall`) for inspected traffic.
+- VPC-B TGW attachments must have `Options.ApplianceModeSupport = enable`.
+- TGW transit traffic uses AWS-managed TGW attachment ENIs in `10.1.2.0/24`; B1 OS-level `tcpdump` is not a valid transit visibility test.
+
+List Model 2+3 route tables:
+
+```powershell
+aws ec2 describe-transit-gateway-route-tables `
+  --filters "Name=tag:Role,Values=spoke,firewall" `
+  --query "TransitGatewayRouteTables[*].{Name:Tags[?Key=='Name']|[0].Value,Role:Tags[?Key=='Role']|[0].Value,Id:TransitGatewayRouteTableId,State:State}" `
+  --output json `
+  --region us-east-1
+```
+
+Verify associations for a route table:
+
+```powershell
+aws ec2 get-transit-gateway-route-table-associations `
+  --transit-gateway-route-table-id <RT_ID> `
+  --query "Associations[*].{Attachment:TransitGatewayAttachmentId,Resource:ResourceId,Type:ResourceType,State:State}" `
+  --output json `
+  --region us-east-1
+```
+
+Search active routes in a specific route table:
+
+```powershell
+aws ec2 search-transit-gateway-routes `
+  --transit-gateway-route-table-id <RT_ID> `
+  --filters "Name=state,Values=active" `
+  --query "Routes[*].{Cidr:DestinationCidrBlock,Type:Type,State:State,Attachments:TransitGatewayAttachments[*].ResourceId}" `
+  --output json `
+  --region us-east-1
+```
+
+Verify appliance mode on VPC-B attachments:
+
+```powershell
+aws ec2 describe-transit-gateway-vpc-attachments `
+  --filters "Name=tag:Name,Values=*attach-vpc-b*" `
+  --query "TransitGatewayVpcAttachments[*].{Name:Tags[?Key=='Name']|[0].Value,Id:TransitGatewayAttachmentId,Appliance:Options.ApplianceModeSupport,State:State}" `
+  --output json `
+  --region us-east-1
+```
+
+Expected pattern:
+
+- TGW1 spoke RT: VPC-A and VPC-C associated, default route to VPC-B attachment.
+- TGW1 firewall RT: VPC-B associated, routes back to VPC-A and VPC-C, default route to VPC-A for NAT egress.
+- TGW2 spoke RT: VPC-C and VPC-D associated, default route to VPC-B attachment.
+- TGW2 firewall RT: VPC-B associated, routes back to VPC-B, VPC-C, and VPC-D, default route to VPC-B.
+
+IAM permissions useful for A2 diagnostics:
+
+- `ec2:SearchTransitGatewayRoutes`
+- `ec2:DescribeTransitGatewayRouteTables`
+- `ec2:GetTransitGatewayRouteTableAssociations`
+- `ec2:GetTransitGatewayRouteTablePropagations`
+- `ec2:DescribeTransitGatewayVpcAttachments`
+
 ## Route Table Validation
 
 Check the subnet route tables that matter, not just the VPC:

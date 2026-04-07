@@ -44,6 +44,11 @@ This is the current working architecture. Future sessions should assume this unl
 - `TGW1` connects A, B, and C
 - `TGW2` connects B, C, and D
 - VPC-A must not have direct reachability to VPC-D
+- Model 2+3 two-table TGW routing is active:
+  - TGW1 Spoke RT associates VPC-A and VPC-C; TGW1 Firewall RT associates VPC-B
+  - TGW2 Spoke RT associates VPC-C and VPC-D; TGW2 Firewall RT associates VPC-B
+  - Spoke RT defaults point to VPC-B inspection attachments
+  - VPC-B attachments have appliance mode enabled
 
 Architecture facts that matter operationally:
 
@@ -52,6 +57,8 @@ Architecture facts that matter operationally:
 - one public customer-entry load balancer still exists in VPC-B untrust
 - Route 53 is not part of the custom lab architecture
 - `alb_dns_name` is the compatibility output name for the public customer-entry load balancer
+- inter-VPC traffic can arrive at destination controls from the VPC-B TGW attachment subnet `10.1.2.0/24`
+- B1 OS-level `tcpdump` is not valid proof of TGW transit visibility because TGW uses AWS-managed attachment ENIs
 
 ## Canonical Skill Paths
 
@@ -89,6 +96,7 @@ Reason:
 - creates or reuses golden AMIs
 - writes the AMI override file
 - applies Terraform in phases
+- verifies the Model 2+3 two-table TGW pattern after convergence
 - attaches SSM profiles
 - bootstraps nginx through A2
 - runs SSM netchecks
@@ -163,6 +171,12 @@ All VPC-C subnet route tables must retain:
 
 - `0.0.0.0/0 -> TGW1`
 
+Model 2+3 TGW route tables must retain:
+
+- Spoke RT default routes `0.0.0.0/0 -> VPC-B`
+- Firewall RT associations for VPC-B
+- VPC-B attachment appliance mode set to `enable`
+
 ### NACLs
 
 `nacl-a` must retain:
@@ -175,6 +189,17 @@ All VPC-C subnet route tables must retain:
 `nacl-c-dmz` must retain:
 
 - egress `96` tcp `80` to `10.2.2.0/24`
+
+Model 2+3 transit controls must retain:
+
+- `nacl-b-trust` ingress `92` tcp `80` from `10.0.0.0/16`
+- `nacl-b-trust` egress `101` tcp `80` to `10.2.0.0/16`
+- `nacl-c-dmz` ingress `99` tcp `80` from `10.1.2.0/24`
+- `nacl-c-dmz` ingress `100` tcp `443` from `10.1.2.0/24`
+- `nacl-c-portal` ingress `93` tcp `80` from `10.1.2.0/24`
+- `nacl-c-portal` ingress `94` tcp `443` from `10.1.2.0/24`
+- `nacl-c-portal` egress `89` tcp `1024-65535` to `10.1.2.0/24`
+- C1/C2/C3 SG ingress tcp `443` from `10.1.2.0/24`
 
 ### Service validation
 

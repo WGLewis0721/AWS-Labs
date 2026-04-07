@@ -703,7 +703,8 @@ if ($stateListResult.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($stat
 $manualInventory = @(
   "IAM: lab-a1-diagnostic-role + lab-a1-diagnostic-profile",
   "IAM: lab-a2-diagnostic-role + lab-a2-diagnostic-profile",
-  "SSM: lab-netcheck-a1 + lab-netcheck-a2 command documents"
+  "SSM: lab-netcheck-a1 + lab-netcheck-a2 command documents",
+  "Model 2+3 TGW route tables/routes/associations: Terraform-managed, not manually deleted"
 )
 
 Write-Section "TGW LAB TEARDOWN PRE-FLIGHT"
@@ -771,6 +772,35 @@ Invoke-ManualAction -Label "IAM bundle lab-a1-diagnostic-role/profile" -Action {
 
 Invoke-ManualAction -Label "IAM bundle lab-a2-diagnostic-role/profile" -Action {
   Remove-IamRoleAndProfileIfPresent -RoleName "lab-a2-diagnostic-role" -InstanceProfileName "lab-a2-diagnostic-profile" -PolicyArns $diagnosticPolicies
+}
+
+Write-Section "SECTION 1A - Model 2+3 Terraform-Managed TGW Resources"
+
+$model23ManagedAddresses = @(
+  'module.network.aws_ec2_transit_gateway_route_table.tgw1_spoke',
+  'module.network.aws_ec2_transit_gateway_route_table.tgw1_firewall',
+  'module.network.aws_ec2_transit_gateway_route_table.tgw2_spoke',
+  'module.network.aws_ec2_transit_gateway_route_table.tgw2_firewall',
+  'module.network.aws_ec2_transit_gateway_route_table_association.tgw1_vpc_a_spoke',
+  'module.network.aws_ec2_transit_gateway_route_table_association.tgw1_vpc_b_firewall',
+  'module.network.aws_ec2_transit_gateway_route_table_association.tgw1_vpc_c_spoke',
+  'module.network.aws_ec2_transit_gateway_route_table_association.tgw2_vpc_b_firewall',
+  'module.network.aws_ec2_transit_gateway_route_table_association.tgw2_vpc_c_spoke',
+  'module.network.aws_ec2_transit_gateway_route_table_association.tgw2_vpc_d_spoke'
+)
+
+$missingModel23Addresses = @(
+  $model23ManagedAddresses |
+    Where-Object { -not (Test-StateAddressManaged -Address $_) }
+)
+
+if ($missingModel23Addresses.Count -eq 0) {
+  Write-Host "Model 2+3 TGW route table and association resources are present in Terraform state."
+  Write-Host "Skipping manual deletion; Terraform destroy will remove managed TGW resources in dependency order."
+}
+else {
+  Write-Warning "Some expected Model 2+3 TGW state addresses are missing. Terraform destroy will still run, but inspect manually if TGW resources remain."
+  Write-IndentedList -Items $missingModel23Addresses
 }
 
 Write-Section "SECTION 2 - Terraform Destroy"

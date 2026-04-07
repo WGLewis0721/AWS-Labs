@@ -40,12 +40,12 @@ locals {
   }
 
   attachment_definitions = {
-    tgw1_a = { name = "tgw1-attach-vpc-a", subnet = "a", tgw_key = "tgw1", vpc_key = "a" }
-    tgw1_b = { name = "tgw1-attach-vpc-b", subnet = "b_trust", tgw_key = "tgw1", vpc_key = "b" }
-    tgw1_c = { name = "tgw1-attach-vpc-c", subnet = "c_dmz", tgw_key = "tgw1", vpc_key = "c" }
-    tgw2_b = { name = "tgw2-attach-vpc-b", subnet = "b_trust", tgw_key = "tgw2", vpc_key = "b" }
-    tgw2_c = { name = "tgw2-attach-vpc-c", subnet = "c_dmz", tgw_key = "tgw2", vpc_key = "c" }
-    tgw2_d = { name = "tgw2-attach-vpc-d", subnet = "d", tgw_key = "tgw2", vpc_key = "d" }
+    tgw1_a = { name = "tgw1-attach-vpc-a", subnet = "a", tgw_key = "tgw1", vpc_key = "a", appliance_mode_support = "disable" }
+    tgw1_b = { name = "tgw1-attach-vpc-b", subnet = "b_trust", tgw_key = "tgw1", vpc_key = "b", appliance_mode_support = "enable" }
+    tgw1_c = { name = "tgw1-attach-vpc-c", subnet = "c_dmz", tgw_key = "tgw1", vpc_key = "c", appliance_mode_support = "disable" }
+    tgw2_b = { name = "tgw2-attach-vpc-b", subnet = "b_trust", tgw_key = "tgw2", vpc_key = "b", appliance_mode_support = "enable" }
+    tgw2_c = { name = "tgw2-attach-vpc-c", subnet = "c_dmz", tgw_key = "tgw2", vpc_key = "c", appliance_mode_support = "disable" }
+    tgw2_d = { name = "tgw2-attach-vpc-d", subnet = "d", tgw_key = "tgw2", vpc_key = "d", appliance_mode_support = "disable" }
   }
 
   # Route entries keyed by unique name; igw/tgw are nullable strings.
@@ -95,14 +95,8 @@ locals {
     tgw2_route_default = { attachment_key = "tgw2_b", cidr = "0.0.0.0/0", route_table = "tgw2" }
   }
 
-  tgw_associations = {
-    tgw1_a = { attachment_key = "tgw1_a", route_table = "tgw1" }
-    tgw1_b = { attachment_key = "tgw1_b", route_table = "tgw1" }
-    tgw1_c = { attachment_key = "tgw1_c", route_table = "tgw1" }
-    tgw2_b = { attachment_key = "tgw2_b", route_table = "tgw2" }
-    tgw2_c = { attachment_key = "tgw2_c", route_table = "tgw2" }
-    tgw2_d = { attachment_key = "tgw2_d", route_table = "tgw2" }
-  }
+  # Model 2+3 cutover moved associations to explicit spoke/firewall route tables.
+  tgw_associations = {}
 
   # Flat list of NACL rules. For ICMP rules from_port = icmp_type, to_port = icmp_code.
   nacl_rules = [
@@ -153,6 +147,7 @@ locals {
     { acl = "b_trust", egress = false, rule_number = 86, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 443, to_port = 443 },
     { acl = "b_trust", egress = false, rule_number = 90, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 22, to_port = 22 },
     { acl = "b_trust", egress = false, rule_number = 91, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
+    { acl = "b_trust", egress = false, rule_number = 92, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 80, to_port = 80 },
     { acl = "b_trust", egress = false, rule_number = 100, protocol = "tcp", cidr_block = "10.1.1.0/24", from_port = 1024, to_port = 65535 },
     { acl = "b_trust", egress = false, rule_number = 101, protocol = "tcp", cidr_block = "10.1.3.0/24", from_port = 1024, to_port = 65535 },
     { acl = "b_trust", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 1024, to_port = 65535 },
@@ -162,6 +157,7 @@ locals {
     { acl = "b_trust", egress = true, rule_number = 90, protocol = "tcp", cidr_block = "10.1.3.0/24", from_port = 22, to_port = 22 },
     { acl = "b_trust", egress = true, rule_number = 91, protocol = "tcp", cidr_block = "10.1.3.0/24", from_port = 443, to_port = 443 },
     { acl = "b_trust", egress = true, rule_number = 100, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 443, to_port = 443 },
+    { acl = "b_trust", egress = true, rule_number = 101, protocol = "tcp", cidr_block = "10.2.0.0/16", from_port = 80, to_port = 80 },
     { acl = "b_trust", egress = true, rule_number = 110, protocol = "tcp", cidr_block = "10.1.1.0/24", from_port = 1024, to_port = 65535 },
     { acl = "b_trust", egress = true, rule_number = 120, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 1024, to_port = 65535 },
     { acl = "b_trust", egress = true, rule_number = 130, protocol = "icmp", cidr_block = "10.0.0.0/8", from_port = -1, to_port = -1 },
@@ -182,6 +178,7 @@ locals {
 
     # ── nacl "c_dmz" (subnet-c-dmz) ─────────────────────────────────────
     # Inbound
+    { acl = "c_dmz", egress = false, rule_number = 99, protocol = "tcp", cidr_block = "10.1.2.0/24", from_port = 80, to_port = 80 },
     { acl = "c_dmz", egress = false, rule_number = 100, protocol = "tcp", cidr_block = "10.1.2.0/24", from_port = 443, to_port = 443 },
     { acl = "c_dmz", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
     { acl = "c_dmz", egress = false, rule_number = 111, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 8443, to_port = 8443 },
@@ -217,6 +214,8 @@ locals {
     { acl = "c_portal", egress = false, rule_number = 90, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 80, to_port = 80 },
     { acl = "c_portal", egress = false, rule_number = 91, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 443, to_port = 443 },
     { acl = "c_portal", egress = false, rule_number = 92, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 22, to_port = 22 },
+    { acl = "c_portal", egress = false, rule_number = 93, protocol = "tcp", cidr_block = "10.1.2.0/24", from_port = 80, to_port = 80 },
+    { acl = "c_portal", egress = false, rule_number = 94, protocol = "tcp", cidr_block = "10.1.2.0/24", from_port = 443, to_port = 443 },
     { acl = "c_portal", egress = false, rule_number = 100, protocol = "tcp", cidr_block = "10.2.1.0/24", from_port = 443, to_port = 443 },
     { acl = "c_portal", egress = false, rule_number = 101, protocol = "tcp", cidr_block = "10.2.1.0/24", from_port = 80, to_port = 80 },
     { acl = "c_portal", egress = false, rule_number = 110, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 8443, to_port = 8443 },
@@ -229,6 +228,7 @@ locals {
     { acl = "c_portal", egress = true, rule_number = 86, protocol = "tcp", cidr_block = "10.1.3.0/24", from_port = 22, to_port = 22 },
     { acl = "c_portal", egress = true, rule_number = 87, protocol = "tcp", cidr_block = "10.1.3.0/24", from_port = 443, to_port = 443 },
     { acl = "c_portal", egress = true, rule_number = 88, protocol = "tcp", cidr_block = "10.3.0.0/16", from_port = 443, to_port = 443 },
+    { acl = "c_portal", egress = true, rule_number = 89, protocol = "tcp", cidr_block = "10.1.2.0/24", from_port = 1024, to_port = 65535 },
     { acl = "c_portal", egress = true, rule_number = 90, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 1024, to_port = 65535 },
     { acl = "c_portal", egress = true, rule_number = 100, protocol = "tcp", cidr_block = "10.2.1.0/24", from_port = 1024, to_port = 65535 },
     { acl = "c_portal", egress = true, rule_number = 110, protocol = "tcp", cidr_block = "10.0.0.0/16", from_port = 1024, to_port = 65535 },
@@ -422,9 +422,50 @@ resource "aws_ec2_transit_gateway_route_table" "this" {
   tags = merge(var.tags, { Name = each.value.route_table })
 }
 
+resource "aws_ec2_transit_gateway_route_table" "tgw1_spoke" {
+  transit_gateway_id = aws_ec2_transit_gateway.this["tgw1"].id
+
+  tags = {
+    Name    = "tgw1-rt-spoke"
+    Project = "tgw-segmentation-lab"
+    Role    = "spoke"
+  }
+}
+
+resource "aws_ec2_transit_gateway_route_table" "tgw1_firewall" {
+  transit_gateway_id = aws_ec2_transit_gateway.this["tgw1"].id
+
+  tags = {
+    Name    = "tgw1-rt-firewall"
+    Project = "tgw-segmentation-lab"
+    Role    = "firewall"
+  }
+}
+
+resource "aws_ec2_transit_gateway_route_table" "tgw2_spoke" {
+  transit_gateway_id = aws_ec2_transit_gateway.this["tgw2"].id
+
+  tags = {
+    Name    = "tgw2-rt-spoke"
+    Project = "tgw-segmentation-lab"
+    Role    = "spoke"
+  }
+}
+
+resource "aws_ec2_transit_gateway_route_table" "tgw2_firewall" {
+  transit_gateway_id = aws_ec2_transit_gateway.this["tgw2"].id
+
+  tags = {
+    Name    = "tgw2-rt-firewall"
+    Project = "tgw-segmentation-lab"
+    Role    = "firewall"
+  }
+}
+
 resource "aws_ec2_transit_gateway_vpc_attachment" "this" {
   for_each = local.attachment_definitions
 
+  appliance_mode_support                          = each.value.appliance_mode_support
   subnet_ids                                      = [aws_subnet.this[each.value.subnet].id]
   transit_gateway_default_route_table_association = false
   transit_gateway_default_route_table_propagation = false
@@ -434,11 +475,55 @@ resource "aws_ec2_transit_gateway_vpc_attachment" "this" {
   tags = merge(var.tags, { Name = each.value.name })
 }
 
-resource "aws_ec2_transit_gateway_route_table_association" "this" {
-  for_each = local.tgw_associations
+resource "aws_ec2_transit_gateway_route_table_association" "tgw1_vpc_a_spoke" {
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw1_a"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw1_spoke.id
 
-  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this[each.value.attachment_key].id
-  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.this[each.value.route_table].id
+  depends_on = [aws_ec2_transit_gateway_route.tgw1_spoke_default]
+}
+
+resource "aws_ec2_transit_gateway_route_table_association" "tgw1_vpc_c_spoke" {
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw1_c"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw1_spoke.id
+
+  depends_on = [aws_ec2_transit_gateway_route.tgw1_spoke_default]
+}
+
+resource "aws_ec2_transit_gateway_route_table_association" "tgw1_vpc_b_firewall" {
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw1_b"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw1_firewall.id
+
+  depends_on = [
+    aws_ec2_transit_gateway_route.tgw1_fw_default,
+    aws_ec2_transit_gateway_route.tgw1_fw_vpc_a,
+    aws_ec2_transit_gateway_route.tgw1_fw_vpc_c,
+  ]
+}
+
+resource "aws_ec2_transit_gateway_route_table_association" "tgw2_vpc_d_spoke" {
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw2_d"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw2_spoke.id
+
+  depends_on = [aws_ec2_transit_gateway_route.tgw2_spoke_default]
+}
+
+resource "aws_ec2_transit_gateway_route_table_association" "tgw2_vpc_c_spoke" {
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw2_c"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw2_spoke.id
+
+  depends_on = [aws_ec2_transit_gateway_route.tgw2_spoke_default]
+}
+
+resource "aws_ec2_transit_gateway_route_table_association" "tgw2_vpc_b_firewall" {
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw2_b"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw2_firewall.id
+
+  depends_on = [
+    aws_ec2_transit_gateway_route.tgw2_fw_default,
+    aws_ec2_transit_gateway_route.tgw2_fw_vpc_b,
+    aws_ec2_transit_gateway_route.tgw2_fw_vpc_c,
+    aws_ec2_transit_gateway_route.tgw2_fw_vpc_d,
+  ]
 }
 
 resource "aws_ec2_transit_gateway_route" "this" {
@@ -447,8 +532,60 @@ resource "aws_ec2_transit_gateway_route" "this" {
   destination_cidr_block         = each.value.cidr
   transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this[each.value.attachment_key].id
   transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.this[each.value.route_table].id
+}
 
-  depends_on = [aws_ec2_transit_gateway_route_table_association.this]
+resource "aws_ec2_transit_gateway_route" "tgw1_spoke_default" {
+  destination_cidr_block         = "0.0.0.0/0"
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw1_b"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw1_spoke.id
+}
+
+resource "aws_ec2_transit_gateway_route" "tgw1_fw_default" {
+  destination_cidr_block         = "0.0.0.0/0"
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw1_a"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw1_firewall.id
+}
+
+resource "aws_ec2_transit_gateway_route" "tgw1_fw_vpc_a" {
+  destination_cidr_block         = "10.0.0.0/16"
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw1_a"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw1_firewall.id
+}
+
+resource "aws_ec2_transit_gateway_route" "tgw1_fw_vpc_c" {
+  destination_cidr_block         = "10.2.0.0/16"
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw1_c"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw1_firewall.id
+}
+
+resource "aws_ec2_transit_gateway_route" "tgw2_spoke_default" {
+  destination_cidr_block         = "0.0.0.0/0"
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw2_b"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw2_spoke.id
+}
+
+resource "aws_ec2_transit_gateway_route" "tgw2_fw_default" {
+  destination_cidr_block         = "0.0.0.0/0"
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw2_b"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw2_firewall.id
+}
+
+resource "aws_ec2_transit_gateway_route" "tgw2_fw_vpc_b" {
+  destination_cidr_block         = "10.1.0.0/16"
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw2_b"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw2_firewall.id
+}
+
+resource "aws_ec2_transit_gateway_route" "tgw2_fw_vpc_c" {
+  destination_cidr_block         = "10.2.0.0/16"
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw2_c"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw2_firewall.id
+}
+
+resource "aws_ec2_transit_gateway_route" "tgw2_fw_vpc_d" {
+  destination_cidr_block         = "10.3.0.0/16"
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this["tgw2_d"].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw2_firewall.id
 }
 
 # ============================================================

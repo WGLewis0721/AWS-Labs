@@ -293,6 +293,14 @@ resource "aws_security_group" "c1_portal" {
   }
 
   ingress {
+    description = "HTTPS transit from VPC-B trust (TGW inspection path)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.2.0/24"]
+  }
+
+  ingress {
     description = "HTTP management from VPC-A"
     from_port   = 80
     to_port     = 80
@@ -429,6 +437,14 @@ resource "aws_security_group" "c2_gateway" {
   }
 
   ingress {
+    description = "HTTPS transit from VPC-B trust (TGW inspection path)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.2.0/24"]
+  }
+
+  ingress {
     description = "Peer interface from VPC-A"
     from_port   = 444
     to_port     = 444
@@ -522,6 +538,14 @@ resource "aws_security_group" "c3_controller" {
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  ingress {
+    description = "HTTPS transit from VPC-B trust (TGW inspection path)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["10.1.2.0/24"]
   }
 
   ingress {

@@ -49,6 +49,10 @@ Assume these are true unless the task explicitly says they changed:
 - direct private-IP validation from `A1` and `A2`
 - one public customer-entry load balancer only
 - Route 53 is not used for custom lab resources
+- Model 2+3 two-table TGW routing is active and Terraform-managed
+- VPC-B TGW attachments have appliance mode enabled
+- destination controls must account for TGW attachment subnet source traffic from `10.1.2.0/24`
+- B1 OS-level `tcpdump` is not valid proof of TGW transit visibility because TGW uses AWS-managed attachment ENIs
 - current direct validation targets are:
   - `10.1.3.10`
   - `10.2.2.10`
