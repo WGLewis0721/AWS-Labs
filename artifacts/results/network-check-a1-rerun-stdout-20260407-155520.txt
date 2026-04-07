@@ -1,0 +1,105 @@
+﻿TGW Segmentation Lab - A1 Windows Verification
+Date: 4/7/2026 8:55:24 PM
+Report: C:\Temp\netcheck-a1-20260407-155520.txt
+
+============================================================
+  SECTION 1 - A1 Self Check
+============================================================
+[CHECK] Checking A1 identity and routing
+  INFO - A1 private IP: 10.0.1.10
+  PASS - Running on correct instance (A1 at 10.0.1.10)
+===========================================================================
+Interface List
+  8...02 16 c6 af ca 7d ......Amazon Elastic Network Adapter
+  1...........................Software Loopback Interface 1
+===========================================================================
+
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0         10.0.1.1        10.0.1.10     20
+         10.0.1.0    255.255.255.0         On-link         10.0.1.10    276
+        10.0.1.10  255.255.255.255         On-link         10.0.1.10    276
+       10.0.1.255  255.255.255.255         On-link         10.0.1.10    276
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+        127.0.0.1  255.255.255.255         On-link         127.0.0.1    331
+  127.255.255.255  255.255.255.255         On-link         127.0.0.1    331
+  169.254.169.123  255.255.255.255         On-link         10.0.1.10     21
+  169.254.169.249  255.255.255.255         On-link         10.0.1.10     21
+  169.254.169.250  255.255.255.255         On-link         10.0.1.10     21
+  169.254.169.251  255.255.255.255         On-link         10.0.1.10     21
+  169.254.169.253  255.255.255.255         On-link         10.0.1.10     21
+  169.254.169.254  255.255.255.255         On-link         10.0.1.10     21
+        224.0.0.0        240.0.0.0         On-link         127.0.0.1    331
+        224.0.0.0        240.0.0.0         On-link         10.0.1.10    276
+  255.255.255.255  255.255.255.255         On-link         127.0.0.1    331
+  255.255.255.255  255.255.255.255         On-link         10.0.1.10    276
+===========================================================================
+Persistent Routes:
+  None
+
+IPv6 Route Table
+===========================================================================
+Active Routes:
+ If Metric Network Destination      Gateway
+  1    331 ::1/128                  On-link
+  8     21 fd00:ec2::123/128        On-link
+  8     21 fd00:ec2::250/128        On-link
+  8     21 fd00:ec2::253/128        On-link
+  8     21 fd00:ec2::254/128        On-link
+  8    276 fe80::/64                On-link
+  8    276 fe80::d8a0:300b:7d08:28bb/128
+                                    On-link
+  1    331 ff00::/8                 On-link
+  8    276 ff00::/8                 On-link
+===========================================================================
+Persistent Routes:
+  None
+  INFO - Route table captured in report output
+
+============================================================
+  SECTION 2 - Direct Private Reachability
+============================================================
+[CHECK] Testing B1 MGMT (10.1.3.10)
+  PASS - B1 MGMT ping reachable
+  PASS - B1 MGMT TCP 443 is OPEN
+  PASS - B1 MGMT returned HTTP 200 from https://10.1.3.10
+[CHECK] Testing C1 Portal (10.2.2.10)
+  PASS - C1 Portal ping reachable
+  PASS - C1 Portal TCP 80 is OPEN
+  PASS - C1 Portal TCP 443 is OPEN
+  PASS - C1 Portal returned HTTP 200 from http://10.2.2.10
+  PASS - C1 Portal returned HTTP 200 from https://10.2.2.10
+[CHECK] Testing C2 Gateway (10.2.3.10)
+  PASS - C2 Gateway ping reachable
+  PASS - C2 Gateway TCP 443 is OPEN
+  PASS - C2 Gateway returned HTTP 200 from https://10.2.3.10
+[CHECK] Testing C3 Controller (10.2.4.10)
+  PASS - C3 Controller ping reachable
+  PASS - C3 Controller TCP 443 is OPEN
+  PASS - C3 Controller returned HTTP 200 from https://10.2.4.10
+
+============================================================
+  SECTION 3 - VPC-D Isolation
+============================================================
+[CHECK] Testing D1 isolation at 10.3.1.10
+  PASS - Isolation confirmed - A1 cannot ping D1
+  PASS - Isolation confirmed - TCP 80 to D1 is blocked
+
+============================================================
+  SECTION 4 - Optional AWS CLI Sanity
+============================================================
+  WARN - AWS CLI not found on A1 - skipping AWS sanity checks
+
+============================================================
+  SECTION 5 - Summary
+============================================================
+  INFO - Use Chrome on A1 to open:
+  INFO -   https://10.1.3.10
+  INFO -   https://10.2.2.10
+  INFO -   https://10.2.3.10
+  INFO -   https://10.2.4.10
+  INFO - If a cert warning appears, type 'thisisunsafe' on the warning page.
+  INFO - Report saved to: C:\Temp\netcheck-a1-20260407-155520.txt
+

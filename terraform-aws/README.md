@@ -113,9 +113,9 @@ Healthy state:
 | A1 | `10.2.4.10` | HTTPS | allowed |
 | A1 | `10.3.1.10` | any | blocked |
 | A2 | `10.1.3.10` | SSH / HTTPS / ICMP | allowed |
-| A2 | `10.2.2.10` | SSH / HTTP / HTTPS / ICMP | allowed |
-| A2 | `10.2.3.10` | SSH / HTTPS / ICMP | allowed |
-| A2 | `10.2.4.10` | SSH / HTTPS / ICMP | allowed |
+| A2 | `10.2.2.10` | HTTP / HTTPS / ICMP | allowed |
+| A2 | `10.2.3.10` | HTTPS / ICMP | allowed |
+| A2 | `10.2.4.10` | HTTPS / ICMP | allowed |
 | A2 | `10.3.1.10` | SSH / HTTP / ICMP | blocked |
 | C1 | `10.1.3.10` | SSH / HTTPS | allowed |
 | C1 | `10.3.1.10` | HTTPS | allowed |

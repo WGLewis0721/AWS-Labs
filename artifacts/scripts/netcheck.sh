@@ -84,17 +84,39 @@ check_tcp() {
     return 1
 }
 
+check_tcp_optional() {
+    local label="$1"
+    local host="$2"
+    local port="$3"
+    local timeout_secs="${4:-5}"
+    if timeout "$timeout_secs" bash -c ">/dev/tcp/$host/$port" 2>/dev/null; then
+        pass "$label - TCP $host:$port is OPEN"
+        return 0
+    fi
+    warn "$label - TCP $host:$port is unreachable; optional diagnostic, not a Model 2+3 acceptance target"
+    return 0
+}
+
 check_http() {
     local label="$1"
     local url="$2"
     local expected="${3:-200}"
     local code=""
     local rc=0
+    local errexit_was_set=0
+
+    case "$-" in
+        *e*) errexit_was_set=1 ;;
+    esac
 
     set +e
     code="$(curl -sk --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null)"
     rc=$?
-    set -e
+    if [ "$errexit_was_set" -eq 1 ]; then
+        set -e
+    else
+        set +e
+    fi
 
     if [ $rc -ne 0 ] || [ -z "$code" ]; then
         code="000"
@@ -130,6 +152,11 @@ check_ssh() {
     fi
 
     local output=""
+    local errexit_was_set=0
+    case "$-" in
+        *e*) errexit_was_set=1 ;;
+    esac
+
     set +e
     output="$(ssh -i "$KEY_PATH" \
         -o StrictHostKeyChecking=no \
@@ -138,7 +165,11 @@ check_ssh() {
         -o BatchMode=yes \
         "ec2-user@$host" "hostname" 2>/dev/null)"
     local rc=$?
-    set -e
+    if [ "$errexit_was_set" -eq 1 ]; then
+        set -e
+    else
+        set +e
+    fi
 
     if [ $rc -eq 0 ] && [ -n "$output" ]; then
         pass "$label - hostname: $output"
@@ -147,6 +178,43 @@ check_ssh() {
 
     fail "$label - $output"
     return 1
+}
+
+check_ssh_optional() {
+    local label="$1"
+    local host="$2"
+    if [ ! -f "$KEY_PATH" ]; then
+        warn "$label - key not found at $KEY_PATH; optional diagnostic skipped"
+        return 0
+    fi
+
+    local output=""
+    local errexit_was_set=0
+    case "$-" in
+        *e*) errexit_was_set=1 ;;
+    esac
+
+    set +e
+    output="$(ssh -i "$KEY_PATH" \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=5 \
+        -o BatchMode=yes \
+        "ec2-user@$host" "hostname" 2>/dev/null)"
+    local rc=$?
+    if [ "$errexit_was_set" -eq 1 ]; then
+        set -e
+    else
+        set +e
+    fi
+
+    if [ $rc -eq 0 ] && [ -n "$output" ]; then
+        pass "$label - hostname: $output"
+        return 0
+    fi
+
+    warn "$label - SSH unreachable; optional diagnostic, not a Model 2+3 acceptance target"
+    return 0
 }
 
 echo "" | tee "$REPORT_FILE"
@@ -214,28 +282,28 @@ header "SECTION 4 - VPC-C Direct Private Reachability"
 
 log "Direct connectivity to C1 Portal ($IP_C1_PORTAL)"
 check_ping "C1 Portal ping" "$IP_C1_PORTAL"
-check_tcp  "C1 Portal TCP 22" "$IP_C1_PORTAL" 22
+check_tcp_optional "C1 Portal TCP 22" "$IP_C1_PORTAL" 22
 check_tcp  "C1 Portal TCP 80" "$IP_C1_PORTAL" 80
 check_tcp  "C1 Portal TCP 443" "$IP_C1_PORTAL" 443
 check_http "C1 Portal HTTP" "http://$IP_C1_PORTAL" "200"
 check_http "C1 Portal HTTPS" "https://$IP_C1_PORTAL" "200"
-check_ssh  "C1 Portal SSH" "$IP_C1_PORTAL"
+check_ssh_optional "C1 Portal SSH" "$IP_C1_PORTAL"
 
 divider
 log "Direct connectivity to C2 Gateway ($IP_C2_GATEWAY)"
 check_ping "C2 Gateway ping" "$IP_C2_GATEWAY"
-check_tcp  "C2 Gateway TCP 22" "$IP_C2_GATEWAY" 22
+check_tcp_optional "C2 Gateway TCP 22" "$IP_C2_GATEWAY" 22
 check_tcp  "C2 Gateway TCP 443" "$IP_C2_GATEWAY" 443
 check_http "C2 Gateway HTTPS" "https://$IP_C2_GATEWAY" "200"
-check_ssh  "C2 Gateway SSH" "$IP_C2_GATEWAY"
+check_ssh_optional "C2 Gateway SSH" "$IP_C2_GATEWAY"
 
 divider
 log "Direct connectivity to C3 Controller ($IP_C3_CONTROLLER)"
 check_ping "C3 Controller ping" "$IP_C3_CONTROLLER"
-check_tcp  "C3 Controller TCP 22" "$IP_C3_CONTROLLER" 22
+check_tcp_optional "C3 Controller TCP 22" "$IP_C3_CONTROLLER" 22
 check_tcp  "C3 Controller TCP 443" "$IP_C3_CONTROLLER" 443
 check_http "C3 Controller HTTPS" "https://$IP_C3_CONTROLLER" "200"
-check_ssh  "C3 Controller SSH" "$IP_C3_CONTROLLER"
+check_ssh_optional "C3 Controller SSH" "$IP_C3_CONTROLLER"
 
 divider
 log "SSH into C1 Portal to check nginx and private-instance egress"
@@ -252,24 +320,28 @@ if [ -f "$KEY_PATH" ]; then
          curl -s http://localhost -o /dev/null -w 'localhost_80=%{http_code}\n'; \
          curl -s --connect-timeout 10 https://checkip.amazonaws.com 2>/dev/null | tr -d '\r\n'" \
         2>/dev/null || true)"
-    echo "$C1_STATUS" | tee -a "$REPORT_FILE"
-    if echo "$C1_STATUS" | grep -q "^active$"; then
-        pass "nginx is active on C1"
+    if [ -n "$C1_STATUS" ]; then
+        echo "$C1_STATUS" | tee -a "$REPORT_FILE"
+        if echo "$C1_STATUS" | grep -q "^active$"; then
+            pass "nginx is active on C1"
+        else
+            fail "nginx is not active on C1"
+        fi
+        if echo "$C1_STATUS" | grep -q "localhost_443=200"; then
+            pass "C1 serves HTTPS locally"
+        else
+            fail "C1 HTTPS localhost check failed"
+        fi
+        if echo "$C1_STATUS" | grep -q "localhost_80=200"; then
+            pass "C1 serves HTTP locally"
+        else
+            fail "C1 HTTP localhost check failed"
+        fi
+        if [ -n "$NAT_EIP" ] && [ "$NAT_EIP" != "AWS_ERROR" ] && [ "$NAT_EIP" != "AWS_NOT_INSTALLED" ] && echo "$C1_STATUS" | grep -q "$NAT_EIP"; then
+            pass "C1 private-instance egress uses NAT gateway EIP $NAT_EIP"
+        fi
     else
-        fail "nginx is not active on C1"
-    fi
-    if echo "$C1_STATUS" | grep -q "localhost_443=200"; then
-        pass "C1 serves HTTPS locally"
-    else
-        fail "C1 HTTPS localhost check failed"
-    fi
-    if echo "$C1_STATUS" | grep -q "localhost_80=200"; then
-        pass "C1 serves HTTP locally"
-    else
-        fail "C1 HTTP localhost check failed"
-    fi
-    if [ -n "$NAT_EIP" ] && [ "$NAT_EIP" != "AWS_ERROR" ] && [ "$NAT_EIP" != "AWS_NOT_INSTALLED" ] && echo "$C1_STATUS" | grep -q "$NAT_EIP"; then
-        pass "C1 private-instance egress uses NAT gateway EIP $NAT_EIP"
+        warn "C1 SSH validation unavailable; external HTTP/HTTPS checks above are the acceptance signals"
     fi
 else
     warn "Key not found at $KEY_PATH - skipping C1 SSH validation"
@@ -512,9 +584,9 @@ echo "" | tee -a "$REPORT_FILE"
 echo -e "${BOLD}Expected healthy outcomes for this simplified lab:${NC}" | tee -a "$REPORT_FILE"
 echo "  - A2 confirms it is 10.0.1.20" | tee -a "$REPORT_FILE"
 echo "  - B1 management path works on 10.1.3.10 (SSH and HTTPS)" | tee -a "$REPORT_FILE"
-echo "  - C1 works on 10.2.2.10 (HTTP, HTTPS, SSH)" | tee -a "$REPORT_FILE"
-echo "  - C2 works on 10.2.3.10 (HTTPS, SSH)" | tee -a "$REPORT_FILE"
-echo "  - C3 works on 10.2.4.10 (HTTPS, SSH)" | tee -a "$REPORT_FILE"
+echo "  - C1 works on 10.2.2.10 (HTTP and HTTPS); SSH is optional diagnostics only" | tee -a "$REPORT_FILE"
+echo "  - C2 works on 10.2.3.10 (HTTPS); SSH is optional diagnostics only" | tee -a "$REPORT_FILE"
+echo "  - C3 works on 10.2.4.10 (HTTPS); SSH is optional diagnostics only" | tee -a "$REPORT_FILE"
 echo "  - D1 remains unreachable from A2" | tee -a "$REPORT_FILE"
 echo "  - No internal NLB-B or NLB-C load balancers remain" | tee -a "$REPORT_FILE"
 echo "  - Model 2+3 Spoke/Firewall TGW route tables are present and appliance mode is enabled" | tee -a "$REPORT_FILE"

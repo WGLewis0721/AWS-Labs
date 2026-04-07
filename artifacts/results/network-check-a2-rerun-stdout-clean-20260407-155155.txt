@@ -1,0 +1,146 @@
+﻿
+TGW Segmentation Lab - Network Diagnostic Script
+Running from: A2 Linux (10.0.1.20)
+Date: Tue Apr  7 20:52:00 UTC 2026
+Report: /tmp/netcheck-a2-20260407-155155.txt
+------------------------------------------------------------
+
+============================================================
+  SECTION 1 - A2 Self Check
+============================================================
+[CHECK] Checking A2 identity and routing table
+  INFO - A2 private IP: 10.0.1.20
+  PASS - Running on correct instance (A2 at 10.0.1.20)
+[CHECK] Checking local route table on A2
+default via 10.0.1.1 dev ens5 proto dhcp src 10.0.1.20 metric 512 
+10.0.0.2 via 10.0.1.1 dev ens5 proto dhcp src 10.0.1.20 metric 512 
+10.0.1.0/24 dev ens5 proto kernel scope link src 10.0.1.20 metric 512 
+10.0.1.1 dev ens5 proto dhcp scope link src 10.0.1.20 metric 512 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown 
+------------------------------------------------------------
+
+============================================================
+  SECTION 2 - Internet Egress Context
+============================================================
+[CHECK] Testing outbound internet connectivity from A2
+  PASS - Internet reachable from A2 - observed public IP: 44.204.129.98
+  INFO - Shared NAT gateway EIP for private instances: 98.94.212.42
+  INFO - A2 is public, so its own egress IP differs from the shared NAT gateway
+------------------------------------------------------------
+
+============================================================
+  SECTION 3 - VPC-B Management Path
+============================================================
+[CHECK] B1 Palo management interface (10.1.3.10)
+  PASS - B1 MGMT ping - ICMP to 10.1.3.10 reachable
+  PASS - B1 MGMT TCP 22 - TCP 10.1.3.10:22 is OPEN
+  PASS - B1 MGMT TCP 443 - TCP 10.1.3.10:443 is OPEN
+  PASS - B1 MGMT HTTPS - HTTP 200 from https://10.1.3.10
+  PASS - B1 MGMT SSH - hostname: b1-paloalto
+------------------------------------------------------------
+
+============================================================
+  SECTION 4 - VPC-C Direct Private Reachability
+============================================================
+[CHECK] Direct connectivity to C1 Portal (10.2.2.10)
+  PASS - C1 Portal ping - ICMP to 10.2.2.10 reachable
+  WARN - C1 Portal TCP 22 - TCP 10.2.2.10:22 is unreachable; optional diagnostic, not a Model 2+3 acceptance target
+  PASS - C1 Portal TCP 80 - TCP 10.2.2.10:80 is OPEN
+  PASS - C1 Portal TCP 443 - TCP 10.2.2.10:443 is OPEN
+  PASS - C1 Portal HTTP - HTTP 200 from http://10.2.2.10
+  PASS - C1 Portal HTTPS - HTTP 200 from https://10.2.2.10
+  WARN - C1 Portal SSH - SSH unreachable; optional diagnostic, not a Model 2+3 acceptance target
+------------------------------------------------------------
+[CHECK] Direct connectivity to C2 Gateway (10.2.3.10)
+  PASS - C2 Gateway ping - ICMP to 10.2.3.10 reachable
+  WARN - C2 Gateway TCP 22 - TCP 10.2.3.10:22 is unreachable; optional diagnostic, not a Model 2+3 acceptance target
+  PASS - C2 Gateway TCP 443 - TCP 10.2.3.10:443 is OPEN
+  PASS - C2 Gateway HTTPS - HTTP 200 from https://10.2.3.10
+  WARN - C2 Gateway SSH - SSH unreachable; optional diagnostic, not a Model 2+3 acceptance target
+------------------------------------------------------------
+[CHECK] Direct connectivity to C3 Controller (10.2.4.10)
+  PASS - C3 Controller ping - ICMP to 10.2.4.10 reachable
+  WARN - C3 Controller TCP 22 - TCP 10.2.4.10:22 is unreachable; optional diagnostic, not a Model 2+3 acceptance target
+  PASS - C3 Controller TCP 443 - TCP 10.2.4.10:443 is OPEN
+  PASS - C3 Controller HTTPS - HTTP 200 from https://10.2.4.10
+  WARN - C3 Controller SSH - SSH unreachable; optional diagnostic, not a Model 2+3 acceptance target
+------------------------------------------------------------
+[CHECK] SSH into C1 Portal to check nginx and private-instance egress
+  WARN - C1 SSH validation unavailable; external HTTP/HTTPS checks above are the acceptance signals
+------------------------------------------------------------
+
+============================================================
+  SECTION 5 - VPC-D Isolation
+============================================================
+[CHECK] Testing A2 to D1 connectivity (expected to fail)
+  PASS - Isolation confirmed - A2 cannot ping D1
+  PASS - Isolation confirmed - TCP 80 to D1 is blocked
+------------------------------------------------------------
+
+============================================================
+  SECTION 6 - AWS CLI Sanity Checks
+============================================================
+[CHECK] Verifying internal NLBs are absent (expected after simplification)
+  PASS - No internal NLB-B or NLB-C load balancers exist
+------------------------------------------------------------
+[CHECK] Checking Model 2+3 TGW two-table pattern
+  PASS - Found both Spoke RTs: tgw-rtb-048b1f202b58aa953	tgw-rtb-08aff34bbf46e3e04
+  PASS - Found both Firewall RTs: tgw-rtb-064e2f1575529422b	tgw-rtb-0b4ef7ed52e24e8fb
+  INFO - VPC-B ID: vpc-0ff82cbc697c0b2df
+  WARN - Could not verify Spoke RT tgw-rtb-048b1f202b58aa953 default route from this role
+  INFO - If this is A2 IAM-limited, run the same check from the operator laptop
+  WARN - Could not verify Spoke RT tgw-rtb-08aff34bbf46e3e04 default route from this role
+  INFO - If this is A2 IAM-limited, run the same check from the operator laptop
+  WARN - Could not verify Firewall RT tgw-rtb-064e2f1575529422b associations from this role
+  WARN - Could not verify Firewall RT tgw-rtb-064e2f1575529422b routes from this role
+  WARN - Could not verify Firewall RT tgw-rtb-0b4ef7ed52e24e8fb associations from this role
+  WARN - Could not verify Firewall RT tgw-rtb-0b4ef7ed52e24e8fb routes from this role
+------------------------------------------------------------
+[CHECK] Checking appliance mode on VPC-B TGW attachments
+  PASS - Appliance mode is enabled on both VPC-B attachments
+------------------------------------------------------------
+[CHECK] Checking VPC-A route table for 10.2.0.0/16
+  INFO - VPC-A ID: vpc-01f66f1e621915e6e
+  PASS - VPC-A route table has 10.2.0.0/16 routed to a transit gateway
+------------------------------------------------------------
+[CHECK] Checking critical NACL rules for Model 2+3 access
+  PASS - VPC-A subnet NACL includes the direct-access rules (111/112/113/125)
+------------------------------------------------------------
+[CHECK] Checking b-trust NACL rules for Model 2+3 transit
+  PASS - b-trust NACL includes transit rules 92 and 101
+------------------------------------------------------------
+[CHECK] Checking c-dmz NACL rules for Model 2+3 transit
+  PASS - c-dmz NACL includes Model 2+3 rules 96, 99, 100, and 110
+------------------------------------------------------------
+[CHECK] Checking c-portal NACL rules for Model 2+3 transit
+  PASS - c-portal NACL includes Model 2+3 rules 89, 93, and 94
+------------------------------------------------------------
+
+============================================================
+  SECTION 7 - Model 2+3 Path Stability
+============================================================
+[CHECK] Running 10 consecutive HTTPS requests to C1
+  PASS - Model 2+3 stability: 10/10 HTTPS requests to C1 succeeded
+------------------------------------------------------------
+
+============================================================
+  SECTION 8 - Diagnostic Summary
+============================================================
+
+Full report saved to: /tmp/netcheck-a2-20260407-155155.txt
+
+Expected healthy outcomes for this simplified lab:
+  - A2 confirms it is 10.0.1.20
+  - B1 management path works on 10.1.3.10 (SSH and HTTPS)
+  - C1 works on 10.2.2.10 (HTTP and HTTPS); SSH is optional diagnostics only
+  - C2 works on 10.2.3.10 (HTTPS); SSH is optional diagnostics only
+  - C3 works on 10.2.4.10 (HTTPS); SSH is optional diagnostics only
+  - D1 remains unreachable from A2
+  - No internal NLB-B or NLB-C load balancers remain
+  - Model 2+3 Spoke/Firewall TGW route tables are present and appliance mode is enabled
+
+Copy report to your laptop:
+  scp -i tgw-lab-key.pem ec2-user@<A2_IP>:/tmp/netcheck-a2-20260407-155155.txt .
+
+
+

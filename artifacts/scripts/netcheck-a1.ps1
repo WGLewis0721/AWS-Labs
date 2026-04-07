@@ -102,6 +102,17 @@ function Get-HttpStatus {
         [int]$TimeoutSeconds = 10
     )
 
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        try {
+            $status = & $curl.Source -k -s -o NUL -w "%{http_code}" --max-time $TimeoutSeconds $Url 2>$null
+            if ($LASTEXITCODE -eq 0 -and $status -match '^\d+$') {
+                return [int]$status
+            }
+        } catch {
+        }
+    }
+
     try {
         $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSeconds -ErrorAction Stop
         return [int]$response.StatusCode

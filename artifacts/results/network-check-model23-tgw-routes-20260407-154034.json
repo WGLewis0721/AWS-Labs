@@ -1,0 +1,187 @@
+﻿[
+    {
+        "Name":  "tgw1-rt-spoke",
+        "RouteTableId":  "tgw-rtb-048b1f202b58aa953",
+        "Associations":  [
+                             {
+                                 "TransitGatewayAttachmentId":  "tgw-attach-0add575b2d88438f6",
+                                 "ResourceId":  "vpc-01f66f1e621915e6e",
+                                 "ResourceType":  "vpc",
+                                 "State":  "associated"
+                             },
+                             {
+                                 "TransitGatewayAttachmentId":  "tgw-attach-0fba819a08552a4cb",
+                                 "ResourceId":  "vpc-0fffd26ae6533fc4a",
+                                 "ResourceType":  "vpc",
+                                 "State":  "associated"
+                             }
+                         ],
+        "Routes":  [
+                       {
+                           "DestinationCidrBlock":  "0.0.0.0/0",
+                           "TransitGatewayRouteTableAnnouncementId":  "",
+                           "TransitGatewayAttachments":  [
+                                                             {
+                                                                 "ResourceId":  "vpc-0ff82cbc697c0b2df",
+                                                                 "TransitGatewayAttachmentId":  "tgw-attach-066fd221541a5125a",
+                                                                 "ResourceType":  "vpc"
+                                                             }
+                                                         ],
+                           "Type":  "static",
+                           "State":  "active"
+                       }
+                   ]
+    },
+    {
+        "Name":  "tgw1-rt-firewall",
+        "RouteTableId":  "tgw-rtb-0b4ef7ed52e24e8fb",
+        "Associations":  [
+                             {
+                                 "TransitGatewayAttachmentId":  "tgw-attach-066fd221541a5125a",
+                                 "ResourceId":  "vpc-0ff82cbc697c0b2df",
+                                 "ResourceType":  "vpc",
+                                 "State":  "associated"
+                             }
+                         ],
+        "Routes":  [
+                       {
+                           "DestinationCidrBlock":  "0.0.0.0/0",
+                           "TransitGatewayRouteTableAnnouncementId":  "",
+                           "TransitGatewayAttachments":  [
+                                                             {
+                                                                 "ResourceId":  "vpc-01f66f1e621915e6e",
+                                                                 "TransitGatewayAttachmentId":  "tgw-attach-0add575b2d88438f6",
+                                                                 "ResourceType":  "vpc"
+                                                             }
+                                                         ],
+                           "Type":  "static",
+                           "State":  "active"
+                       },
+                       {
+                           "DestinationCidrBlock":  "10.0.0.0/16",
+                           "TransitGatewayRouteTableAnnouncementId":  "",
+                           "TransitGatewayAttachments":  [
+                                                             {
+                                                                 "ResourceId":  "vpc-01f66f1e621915e6e",
+                                                                 "TransitGatewayAttachmentId":  "tgw-attach-0add575b2d88438f6",
+                                                                 "ResourceType":  "vpc"
+                                                             }
+                                                         ],
+                           "Type":  "static",
+                           "State":  "active"
+                       },
+                       {
+                           "DestinationCidrBlock":  "10.2.0.0/16",
+                           "TransitGatewayRouteTableAnnouncementId":  "",
+                           "TransitGatewayAttachments":  [
+                                                             {
+                                                                 "ResourceId":  "vpc-0fffd26ae6533fc4a",
+                                                                 "TransitGatewayAttachmentId":  "tgw-attach-0fba819a08552a4cb",
+                                                                 "ResourceType":  "vpc"
+                                                             }
+                                                         ],
+                           "Type":  "static",
+                           "State":  "active"
+                       }
+                   ]
+    },
+    {
+        "Name":  "tgw2-rt-spoke",
+        "RouteTableId":  "tgw-rtb-08aff34bbf46e3e04",
+        "Associations":  [
+                             {
+                                 "TransitGatewayAttachmentId":  "tgw-attach-0989e560b674e039c",
+                                 "ResourceId":  "vpc-0fffd26ae6533fc4a",
+                                 "ResourceType":  "vpc",
+                                 "State":  "associated"
+                             },
+                             {
+                                 "TransitGatewayAttachmentId":  "tgw-attach-002e2a419574cdc3c",
+                                 "ResourceId":  "vpc-02645fa1d218d45ea",
+                                 "ResourceType":  "vpc",
+                                 "State":  "associated"
+                             }
+                         ],
+        "Routes":  [
+                       {
+                           "DestinationCidrBlock":  "0.0.0.0/0",
+                           "TransitGatewayRouteTableAnnouncementId":  "",
+                           "TransitGatewayAttachments":  [
+                                                             {
+                                                                 "ResourceId":  "vpc-0ff82cbc697c0b2df",
+                                                                 "TransitGatewayAttachmentId":  "tgw-attach-08c236efde613922b",
+                                                                 "ResourceType":  "vpc"
+                                                             }
+                                                         ],
+                           "Type":  "static",
+                           "State":  "active"
+                       }
+                   ]
+    },
+    {
+        "Name":  "tgw2-rt-firewall",
+        "RouteTableId":  "tgw-rtb-064e2f1575529422b",
+        "Associations":  [
+                             {
+                                 "TransitGatewayAttachmentId":  "tgw-attach-08c236efde613922b",
+                                 "ResourceId":  "vpc-0ff82cbc697c0b2df",
+                                 "ResourceType":  "vpc",
+                                 "State":  "associated"
+                             }
+                         ],
+        "Routes":  [
+                       {
+                           "DestinationCidrBlock":  "0.0.0.0/0",
+                           "TransitGatewayRouteTableAnnouncementId":  "",
+                           "TransitGatewayAttachments":  [
+                                                             {
+                                                                 "ResourceId":  "vpc-0ff82cbc697c0b2df",
+                                                                 "TransitGatewayAttachmentId":  "tgw-attach-08c236efde613922b",
+                                                                 "ResourceType":  "vpc"
+                                                             }
+                                                         ],
+                           "Type":  "static",
+                           "State":  "active"
+                       },
+                       {
+                           "DestinationCidrBlock":  "10.1.0.0/16",
+                           "TransitGatewayRouteTableAnnouncementId":  "",
+                           "TransitGatewayAttachments":  [
+                                                             {
+                                                                 "ResourceId":  "vpc-0ff82cbc697c0b2df",
+                                                                 "TransitGatewayAttachmentId":  "tgw-attach-08c236efde613922b",
+                                                                 "ResourceType":  "vpc"
+                                                             }
+                                                         ],
+                           "Type":  "static",
+                           "State":  "active"
+                       },
+                       {
+                           "DestinationCidrBlock":  "10.2.0.0/16",
+                           "TransitGatewayRouteTableAnnouncementId":  "",
+                           "TransitGatewayAttachments":  [
+                                                             {
+                                                                 "ResourceId":  "vpc-0fffd26ae6533fc4a",
+                                                                 "TransitGatewayAttachmentId":  "tgw-attach-0989e560b674e039c",
+                                                                 "ResourceType":  "vpc"
+                                                             }
+                                                         ],
+                           "Type":  "static",
+                           "State":  "active"
+                       },
+                       {
+                           "DestinationCidrBlock":  "10.3.0.0/16",
+                           "TransitGatewayRouteTableAnnouncementId":  "",
+                           "TransitGatewayAttachments":  [
+                                                             {
+                                                                 "ResourceId":  "vpc-02645fa1d218d45ea",
+                                                                 "TransitGatewayAttachmentId":  "tgw-attach-002e2a419574cdc3c",
+                                                                 "ResourceType":  "vpc"
+                                                             }
+                                                         ],
+                           "Type":  "static",
+                           "State":  "active"
+                       }
+                   ]
+    }
+]

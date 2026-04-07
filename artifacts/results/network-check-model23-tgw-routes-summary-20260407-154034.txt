@@ -1,0 +1,31 @@
+﻿[tgw1-rt-spoke] tgw-rtb-048b1f202b58aa953
+Associations:
+  - tgw-attach-0add575b2d88438f6 vpc vpc-01f66f1e621915e6e associated
+  - tgw-attach-0fba819a08552a4cb vpc vpc-0fffd26ae6533fc4a associated
+Routes:
+  - 0.0.0.0/0 active static -> tgw-attach-066fd221541a5125a/vpc/vpc-0ff82cbc697c0b2df
+
+[tgw1-rt-firewall] tgw-rtb-0b4ef7ed52e24e8fb
+Associations:
+  - tgw-attach-066fd221541a5125a vpc vpc-0ff82cbc697c0b2df associated
+Routes:
+  - 0.0.0.0/0 active static -> tgw-attach-0add575b2d88438f6/vpc/vpc-01f66f1e621915e6e
+  - 10.0.0.0/16 active static -> tgw-attach-0add575b2d88438f6/vpc/vpc-01f66f1e621915e6e
+  - 10.2.0.0/16 active static -> tgw-attach-0fba819a08552a4cb/vpc/vpc-0fffd26ae6533fc4a
+
+[tgw2-rt-spoke] tgw-rtb-08aff34bbf46e3e04
+Associations:
+  - tgw-attach-0989e560b674e039c vpc vpc-0fffd26ae6533fc4a associated
+  - tgw-attach-002e2a419574cdc3c vpc vpc-02645fa1d218d45ea associated
+Routes:
+  - 0.0.0.0/0 active static -> tgw-attach-08c236efde613922b/vpc/vpc-0ff82cbc697c0b2df
+
+[tgw2-rt-firewall] tgw-rtb-064e2f1575529422b
+Associations:
+  - tgw-attach-08c236efde613922b vpc vpc-0ff82cbc697c0b2df associated
+Routes:
+  - 0.0.0.0/0 active static -> tgw-attach-08c236efde613922b/vpc/vpc-0ff82cbc697c0b2df
+  - 10.1.0.0/16 active static -> tgw-attach-08c236efde613922b/vpc/vpc-0ff82cbc697c0b2df
+  - 10.2.0.0/16 active static -> tgw-attach-0989e560b674e039c/vpc/vpc-0fffd26ae6533fc4a
+  - 10.3.0.0/16 active static -> tgw-attach-002e2a419574cdc3c/vpc/vpc-02645fa1d218d45ea
+
