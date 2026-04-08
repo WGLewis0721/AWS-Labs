@@ -418,10 +418,12 @@ Use the canonical teardown entrypoint from the repository root:
 .\artifacts\scripts\teardown.ps1 -Environment dev -Force
 ```
 
-Keep the backend if needed:
+This preserves the Terraform backend by default.
+
+Delete the backend only when you explicitly want to remove the state bucket and lock table:
 
 ```powershell
-.\artifacts\scripts\teardown.ps1 -Environment dev -KeepBackend -Force
+.\artifacts\scripts\teardown.ps1 -Environment dev -DeleteBackend -Force
 ```
 
 The teardown script is the cost-control path. Use it when you are finished with the lab.

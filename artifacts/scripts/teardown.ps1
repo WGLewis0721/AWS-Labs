@@ -3,6 +3,8 @@ param(
   [ValidateSet("dev", "staging", "prod")]
   [string]$Environment = "dev",
 
+  [switch]$DeleteBackend,
+
   [switch]$KeepBackend,
 
   [switch]$Force
@@ -10,6 +12,19 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($DeleteBackend -and $KeepBackend) {
+  throw "Use either -DeleteBackend or -KeepBackend, not both."
+}
+
+$preserveBackend = $true
+
+if ($DeleteBackend) {
+  $preserveBackend = $false
+}
+elseif ($KeepBackend) {
+  Write-Warning "-KeepBackend is deprecated because backend preservation is now the default."
+}
 
 function Get-RepositoryRoot {
   $current = (Resolve-Path -LiteralPath $PSScriptRoot).Path
@@ -725,13 +740,13 @@ Write-Host ""
 Write-Host "MANUAL (non-Terraform or legacy live fixes):"
 Write-IndentedList -Items $manualInventory
 
-if ($KeepBackend) {
+if ($preserveBackend) {
   Write-Host ""
-  Write-Host "Backend preservation: ENABLED (bucket and DynamoDB table will be kept)"
+  Write-Host "Backend preservation: ENABLED (default behavior; bucket and DynamoDB table will be kept)"
 }
 else {
   Write-Host ""
-  Write-Host "Backend preservation: DISABLED (bucket and DynamoDB table will also be removed)"
+  Write-Host "Backend preservation: DISABLED (explicit -DeleteBackend requested; bucket and DynamoDB table will also be removed)"
 }
 
 if (-not $Force) {
@@ -821,7 +836,7 @@ if (-not $terraformDestroySucceeded) {
 
 $backendCleanupCount = 0
 
-if ($terraformDestroySucceeded -and -not $KeepBackend) {
+if ($terraformDestroySucceeded -and -not $preserveBackend) {
   Write-Section "SECTION 2A - Backend Cleanup"
 
   try {

@@ -327,6 +327,12 @@ Use instance, NAT, TGW, EIP, ELB, and flow-log inspection to find billable resou
 .\artifacts\scripts\teardown.ps1 -Environment dev -Force
 ```
 
+Backend state is preserved by default. Delete the backend only when explicitly intended:
+
+```powershell
+.\artifacts\scripts\teardown.ps1 -Environment dev -DeleteBackend -Force
+```
+
 ## Useful Filters
 
 | Goal | Filter |
