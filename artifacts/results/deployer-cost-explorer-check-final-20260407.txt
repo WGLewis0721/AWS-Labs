@@ -1,0 +1,3 @@
+﻿An error occurred (AccessDeniedException) when calling the GetCostAndUsage operation: User not enabled for cost explorer access
+
+IAM simulation for Deployer allowed ce:GetCostAndUsage, aws-portal:ViewBilling, budgets:ViewBudget, and cost-optimization-hub:ListRecommendations. This indicates the remaining blocker is an account-level Cost Explorer/IAM billing access gate, not the user policy attachment.

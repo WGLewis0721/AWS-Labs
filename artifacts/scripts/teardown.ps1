@@ -542,7 +542,7 @@ function Remove-S3BucketCompletely {
 
     $objects = @()
 
-    if ($listing.Versions) {
+    if (($listing.PSObject.Properties.Name -contains "Versions") -and $listing.Versions) {
       foreach ($version in $listing.Versions) {
         $objects += @{
           Key       = $version.Key
@@ -551,7 +551,7 @@ function Remove-S3BucketCompletely {
       }
     }
 
-    if ($listing.DeleteMarkers) {
+    if (($listing.PSObject.Properties.Name -contains "DeleteMarkers") -and $listing.DeleteMarkers) {
       foreach ($marker in $listing.DeleteMarkers) {
         $objects += @{
           Key       = $marker.Key

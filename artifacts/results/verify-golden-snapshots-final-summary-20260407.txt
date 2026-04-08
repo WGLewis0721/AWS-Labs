@@ -1,0 +1,8 @@
+﻿Golden AMI snapshot verification after teardown:
+- snap-0fb98b4500a456403: InvalidSnapshot.NotFound
+- snap-090bc73ecd6792d98: InvalidSnapshot.NotFound
+- snap-0a762f4a0c8215d10: InvalidSnapshot.NotFound
+- snap-052501459a55d2a7d: InvalidSnapshot.NotFound
+- snap-0983f0da1372450e1: InvalidSnapshot.NotFound
+- snap-08033534cf08584f1: InvalidSnapshot.NotFound
+- snap-09f4f7531403b8a32: InvalidSnapshot.NotFound
